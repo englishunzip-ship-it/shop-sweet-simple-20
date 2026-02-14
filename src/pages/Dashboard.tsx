@@ -6,7 +6,7 @@ import { collection, query, where, getDocs, orderBy, Timestamp } from "firebase/
 import {
   ShoppingCart, Package, Users, AlertTriangle, TrendingUp,
   Plus, LogOut, Smartphone, ArrowRight, Banknote, BarChart3, AlertCircle,
-  Store, Boxes, DollarSign, CreditCard
+  Store, Boxes, DollarSign, CreditCard, Zap
 } from "lucide-react";
 
 const Dashboard: React.FC = () => {
@@ -18,7 +18,6 @@ const Dashboard: React.FC = () => {
   const [totalDue, setTotalDue] = useState(0);
   const [totalProducts, setTotalProducts] = useState(0);
   const [totalCustomers, setTotalCustomers] = useState(0);
-  const [mbTodayTxn, setMbTodayTxn] = useState(0);
   const [mbTodayCommission, setMbTodayCommission] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<any[]>([]);
   const [dueCustomers, setDueCustomers] = useState<any[]>([]);
@@ -32,7 +31,6 @@ const Dashboard: React.FC = () => {
       today.setHours(0, 0, 0, 0);
       const todayTs = Timestamp.fromDate(today);
 
-      // Sales
       const salesQ = query(collection(db, "sales"), where("created_at", ">=", todayTs), orderBy("created_at", "desc"));
       const salesSnap = await getDocs(salesQ);
       let salesTotal = 0, profitTotal = 0;
@@ -45,18 +43,12 @@ const Dashboard: React.FC = () => {
       setTodayCount(salesSnap.size);
       setTodayProfit(profitTotal);
 
-      // Mobile banking
       const mbQ = query(collection(db, "mobile_banking_logs"), where("created_at", ">=", todayTs));
       const mbSnap = await getDocs(mbQ);
-      let mbTxn = 0, mbComm = 0;
-      mbSnap.forEach((doc) => {
-        mbTxn++;
-        mbComm += doc.data().commission || 0;
-      });
-      setMbTodayTxn(mbTxn);
+      let mbComm = 0;
+      mbSnap.forEach((doc) => { mbComm += doc.data().commission || 0; });
       setMbTodayCommission(mbComm);
 
-      // Customers
       const custSnap = await getDocs(collection(db, "customers"));
       let dues = 0;
       const dueList: any[] = [];
@@ -70,7 +62,6 @@ const Dashboard: React.FC = () => {
       dueList.sort((a, b) => b.total_due - a.total_due);
       setDueCustomers(dueList);
 
-      // Products
       const prodSnap = await getDocs(collection(db, "products"));
       const lowStock: any[] = [];
       prodSnap.forEach((doc) => {
@@ -95,7 +86,6 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="animate-fade-in pb-4">
-      {/* Header */}
       <div className="bg-primary px-5 pt-6 pb-12 rounded-b-[2rem]">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3">
@@ -112,7 +102,6 @@ const Dashboard: React.FC = () => {
           </button>
         </div>
 
-        {/* Summary Cards - 3x2 grid */}
         <div className="grid grid-cols-3 gap-2">
           {[
             { icon: TrendingUp, label: "আজকের বিক্রয়", value: `৳${todaySales.toLocaleString("bn-BD")}`, sub: `${todayCount.toLocaleString("bn-BD")} টি` },
@@ -120,7 +109,7 @@ const Dashboard: React.FC = () => {
             { icon: Banknote, label: "মোট বকেয়া", value: `৳${totalDue.toLocaleString("bn-BD")}`, sub: `${dueCustomers.length.toLocaleString("bn-BD")} জন` },
             { icon: Boxes, label: "মোট পণ্য", value: totalProducts.toLocaleString("bn-BD"), sub: `${lowStockItems.length} কম স্টক` },
             { icon: Users, label: "মোট কাস্টমার", value: totalCustomers.toLocaleString("bn-BD"), sub: "" },
-            { icon: Smartphone, label: "মোবাইল ব্যাংকিং", value: `${mbTodayTxn.toLocaleString("bn-BD")} টি`, sub: `কমিশন: ৳${mbTodayCommission.toLocaleString("bn-BD")}` },
+            { icon: Smartphone, label: "মোবাইল ব্যাংকিং", value: `৳${mbTodayCommission.toLocaleString("bn-BD")}`, sub: "টোটাল কমিশন" },
           ].map((card, i) => (
             <div key={i} className="bg-primary-foreground/12 backdrop-blur-sm rounded-2xl p-3 border border-primary-foreground/10">
               <div className="w-7 h-7 rounded-lg bg-primary-foreground/15 flex items-center justify-center mb-1.5">
@@ -135,10 +124,9 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="px-4 -mt-6 space-y-4">
-        {/* Quick Actions */}
         <div className="bg-card rounded-2xl p-5 shadow-md border border-border">
           <h3 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
-            <span className="text-lg">⚡</span> দ্রুত অ্যাকশন
+            <Zap className="w-5 h-5 text-warning" /> দ্রুত অ্যাকশন
           </h3>
           <div className="grid grid-cols-4 gap-3">
             {[
@@ -158,7 +146,6 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Low Stock Alert */}
         {lowStockItems.length > 0 && (
           <div className="bg-card rounded-2xl p-5 shadow-sm border border-destructive/20">
             <div className="flex items-center gap-2 mb-3">
@@ -185,7 +172,6 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Due Customers Alert */}
         {dueCustomers.length > 0 && (
           <div className="bg-card rounded-2xl p-5 shadow-sm border border-warning/20">
             <div className="flex items-center gap-2 mb-3">
@@ -215,7 +201,6 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Report Link */}
         <button onClick={() => navigate("/reports")}
           className="w-full bg-card rounded-2xl p-4 shadow-sm border border-border flex items-center justify-between active:scale-[0.98] transition-transform">
           <div className="flex items-center gap-3">

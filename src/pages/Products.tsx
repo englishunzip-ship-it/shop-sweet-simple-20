@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, Timestamp } from "firebase/firestore";
-import { Plus, Search, Edit2, Trash2, ArrowLeft, Package, Save, Download, Upload, FileUp, AlertCircle } from "lucide-react";
+import { Plus, Search, Edit2, Trash2, ArrowLeft, Package, Save, Download, Upload, FileEdit, PlusCircle } from "lucide-react";
 
 interface Product {
   id: string;
@@ -85,7 +85,6 @@ const Products: React.FC = () => {
     await loadProducts();
   };
 
-  // Export products as JSON
   const handleExport = () => {
     const exportData = products.map(({ id, ...rest }) => rest);
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
@@ -97,7 +96,6 @@ const Products: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Import products from JSON
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -121,10 +119,10 @@ const Products: React.FC = () => {
         });
         count++;
       }
-      setImportResult(`✅ ${count} টি পণ্য সফলভাবে ইমপোর্ট হয়েছে`);
+      setImportResult(`${count} টি পণ্য সফলভাবে ইমপোর্ট হয়েছে`);
       await loadProducts();
     } catch (err) {
-      setImportResult("❌ ইমপোর্ট ব্যর্থ। সঠিক JSON ফাইল ব্যবহার করুন।");
+      setImportResult("ইমপোর্ট ব্যর্থ। সঠিক JSON ফাইল ব্যবহার করুন।");
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -138,7 +136,9 @@ const Products: React.FC = () => {
       <div className="animate-fade-in">
         <div className="flex items-center gap-3 px-4 py-4 border-b border-border bg-card">
           <button onClick={() => setShowForm(false)} className="p-1"><ArrowLeft className="w-6 h-6 text-foreground" /></button>
-          <h2 className="text-xl font-bold text-foreground">{editingProduct ? "📝 পণ্য সম্পাদনা" : "➕ নতুন পণ্য যোগ"}</h2>
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            {editingProduct ? <><FileEdit className="w-5 h-5" /> পণ্য সম্পাদনা</> : <><PlusCircle className="w-5 h-5" /> নতুন পণ্য যোগ</>}
+          </h2>
         </div>
         <div className="p-4 space-y-3">
           <div>
@@ -195,14 +195,15 @@ const Products: React.FC = () => {
     <div className="animate-fade-in">
       <div className="px-4 py-4 bg-card border-b border-border">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xl font-bold text-foreground">📦 পণ্য সমূহ ({products.length})</h2>
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <Package className="w-5 h-5 text-primary" /> পণ্য সমূহ ({products.length})
+          </h2>
           <button onClick={openAdd}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-base font-semibold active:scale-95 transition-transform">
             <Plus className="w-5 h-5" />যোগ করুন
           </button>
         </div>
 
-        {/* Export / Import Buttons */}
         <div className="flex gap-2 mb-3">
           <button onClick={handleExport} disabled={products.length === 0}
             className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-info/10 text-info text-sm font-semibold border border-info/20 active:scale-95 transition-transform disabled:opacity-50">
@@ -214,11 +215,9 @@ const Products: React.FC = () => {
           </label>
         </div>
 
-        {importing && (
-          <div className="text-center py-2 text-sm text-muted-foreground">ইমপোর্ট হচ্ছে...</div>
-        )}
+        {importing && <div className="text-center py-2 text-sm text-muted-foreground">ইমপোর্ট হচ্ছে...</div>}
         {importResult && (
-          <div className={`text-center py-2 text-sm font-medium rounded-xl mb-2 px-3 ${importResult.startsWith("✅") ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+          <div className={`text-center py-2 text-sm font-medium rounded-xl mb-2 px-3 ${importResult.includes("সফল") ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
             {importResult}
           </div>
         )}

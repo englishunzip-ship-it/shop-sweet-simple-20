@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, Timestamp, query, where, orderBy } from "firebase/firestore";
-import { Plus, Search, Edit2, Trash2, Phone, ArrowLeft, Save, Users as UsersIcon, Banknote, History, ChevronDown, ChevronUp, Download, Upload } from "lucide-react";
+import { Plus, Search, Edit2, Trash2, Phone, ArrowLeft, Save, Users as UsersIcon, Banknote, ChevronDown, ChevronUp, Download, Upload, CheckCircle, UserPlus, FileEdit, Coins } from "lucide-react";
 
 interface Customer {
   id: string;
@@ -10,14 +10,6 @@ interface Customer {
   address: string;
   total_due: number;
   notes: string;
-}
-
-interface Payment {
-  id: string;
-  amount: number;
-  payment_method: string;
-  created_at: any;
-  sale_id?: string;
 }
 
 const Customers: React.FC = () => {
@@ -36,8 +28,6 @@ const Customers: React.FC = () => {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [savingPayment, setSavingPayment] = useState(false);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [loadingPayments, setLoadingPayments] = useState(false);
 
   useEffect(() => { loadCustomers(); }, []);
 
@@ -76,7 +66,6 @@ const Customers: React.FC = () => {
     await loadCustomers();
   };
 
-  // Export customers as JSON
   const handleExport = () => {
     const exportData = customers.map(({ id, ...rest }) => rest);
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
@@ -88,7 +77,6 @@ const Customers: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Import customers from JSON
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -102,38 +90,25 @@ const Customers: React.FC = () => {
       for (const item of data) {
         if (!item.name) continue;
         await addDoc(collection(db, "customers"), {
-          name: item.name || "",
-          phone: item.phone || "",
-          address: item.address || "",
-          notes: item.notes || "",
-          total_due: Number(item.total_due) || 0,
-          created_at: Timestamp.now(),
+          name: item.name || "", phone: item.phone || "", address: item.address || "",
+          notes: item.notes || "", total_due: Number(item.total_due) || 0, created_at: Timestamp.now(),
         });
         count++;
       }
-      setImportResult(`✅ ${count} জন কাস্টমার সফলভাবে ইমপোর্ট হয়েছে`);
+      setImportResult(`${count} জন কাস্টমার সফলভাবে ইমপোর্ট হয়েছে`);
       await loadCustomers();
     } catch (err) {
-      setImportResult("❌ ইমপোর্ট ব্যর্থ। সঠিক JSON ফাইল ব্যবহার করুন।");
+      setImportResult("ইমপোর্ট ব্যর্থ। সঠিক JSON ফাইল ব্যবহার করুন।");
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  const openDueManagement = async (c: Customer) => {
+  const openDueManagement = (c: Customer) => {
     if (selectedCustomer?.id === c.id) { setSelectedCustomer(null); return; }
     setSelectedCustomer(c);
     setPaymentAmount("");
-    setLoadingPayments(true);
-    try {
-      const q = query(collection(db, "payments"), where("customer_id", "==", c.id), orderBy("created_at", "desc"));
-      const snap = await getDocs(q);
-      const list: Payment[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Payment));
-      setPayments(list);
-    } catch (e) { console.error(e); setPayments([]); }
-    finally { setLoadingPayments(false); }
   };
 
   const handleCollectPayment = async () => {
@@ -150,11 +125,6 @@ const Customers: React.FC = () => {
       setPaymentAmount("");
       setSelectedCustomer({ ...selectedCustomer, total_due: newDue });
       await loadCustomers();
-      const q = query(collection(db, "payments"), where("customer_id", "==", selectedCustomer.id), orderBy("created_at", "desc"));
-      const snap = await getDocs(q);
-      const list: Payment[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Payment));
-      setPayments(list);
     } catch (e) { console.error(e); }
     finally { setSavingPayment(false); }
   };
@@ -169,7 +139,9 @@ const Customers: React.FC = () => {
       <div className="animate-fade-in">
         <div className="flex items-center gap-3 px-4 py-4 border-b border-border bg-card">
           <button onClick={() => setShowForm(false)} className="p-1"><ArrowLeft className="w-6 h-6 text-foreground" /></button>
-          <h2 className="text-xl font-bold text-foreground">{editing ? "📝 কাস্টমার সম্পাদনা" : "➕ নতুন কাস্টমার"}</h2>
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            {editing ? <><FileEdit className="w-5 h-5" /> কাস্টমার সম্পাদনা</> : <><UserPlus className="w-5 h-5" /> নতুন কাস্টমার</>}
+          </h2>
         </div>
         <div className="p-4 space-y-3">
           {[
@@ -199,13 +171,14 @@ const Customers: React.FC = () => {
     <div className="animate-fade-in">
       <div className="px-4 py-4 bg-card border-b border-border">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xl font-bold text-foreground">👥 কাস্টমার ({customers.length})</h2>
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <UsersIcon className="w-5 h-5 text-primary" /> কাস্টমার ({customers.length})
+          </h2>
           <button onClick={openAdd} className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-base font-semibold active:scale-95 transition-transform">
             <Plus className="w-5 h-5" />যোগ করুন
           </button>
         </div>
 
-        {/* Export / Import */}
         <div className="flex gap-2 mb-3">
           <button onClick={handleExport} disabled={customers.length === 0}
             className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-info/10 text-info text-sm font-semibold border border-info/20 active:scale-95 transition-transform disabled:opacity-50">
@@ -219,7 +192,7 @@ const Customers: React.FC = () => {
 
         {importing && <div className="text-center py-2 text-sm text-muted-foreground">ইমপোর্ট হচ্ছে...</div>}
         {importResult && (
-          <div className={`text-center py-2 text-sm font-medium rounded-xl mb-2 px-3 ${importResult.startsWith("✅") ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+          <div className={`text-center py-2 text-sm font-medium rounded-xl mb-2 px-3 ${importResult.includes("সফল") ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
             {importResult}
           </div>
         )}
@@ -288,7 +261,10 @@ const Customers: React.FC = () => {
                   </div>
                 )}
                 {c.total_due === 0 && selectedCustomer?.id !== c.id && (
-                  <div className="mt-2"><span className="text-sm text-success font-medium">✅ কোনো বকেয়া নেই</span></div>
+                  <div className="mt-2 flex items-center gap-1">
+                    <CheckCircle className="w-4 h-4 text-success" />
+                    <span className="text-sm text-success font-medium">কোনো বকেয়া নেই</span>
+                  </div>
                 )}
               </div>
 
@@ -296,16 +272,20 @@ const Customers: React.FC = () => {
                 <div className="bg-muted/50 p-4 space-y-3 border-t border-border animate-fade-in">
                   {selectedCustomer.total_due > 0 && (
                     <div className="bg-card rounded-xl p-3 space-y-2 border border-border">
-                      <h5 className="text-base font-semibold text-foreground">💰 বকেয়া আদায়</h5>
+                      <h5 className="text-base font-semibold text-foreground flex items-center gap-2">
+                        <Coins className="w-4 h-4 text-primary" /> বকেয়া আদায়
+                      </h5>
                       <input type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)}
                         className="w-full h-12 px-3 rounded-xl border border-input bg-background text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         placeholder="টাকার পরিমাণ" />
                       <div className="flex gap-2">
-                        {[{ v: "cash", l: "💵 নগদ" }, { v: "mobile_banking", l: "📱 মোবাইল" }].map((m) => (
+                        {[{ v: "cash", l: "নগদ", icon: Banknote }, { v: "mobile_banking", l: "মোবাইল", icon: Phone }].map((m) => (
                           <button key={m.v} onClick={() => setPaymentMethod(m.v)}
-                            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
+                            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors flex items-center justify-center gap-1.5 ${
                               paymentMethod === m.v ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"
-                            }`}>{m.l}</button>
+                            }`}>
+                            <m.icon className="w-4 h-4" /> {m.l}
+                          </button>
                         ))}
                       </div>
                       <button onClick={handleCollectPayment} disabled={savingPayment || !paymentAmount}
@@ -314,30 +294,6 @@ const Customers: React.FC = () => {
                       </button>
                     </div>
                   )}
-                  <div>
-                    <h5 className="text-base font-semibold text-foreground flex items-center gap-2 mb-2">
-                      <History className="w-4 h-4" /> পেমেন্ট ইতিহাস
-                    </h5>
-                    {loadingPayments ? (
-                      <p className="text-sm text-muted-foreground">লোড হচ্ছে...</p>
-                    ) : payments.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">কোনো পেমেন্ট নেই</p>
-                    ) : (
-                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                        {payments.map((p) => {
-                          const date = p.created_at?.toDate?.();
-                          return (
-                            <div key={p.id} className="bg-card rounded-lg p-2.5 border border-border flex justify-between items-center">
-                              <p className="text-sm text-muted-foreground">
-                                {date ? date.toLocaleDateString("bn-BD") : ""} · {p.payment_method === "cash" ? "💵 নগদ" : "📱 মোবাইল"}
-                              </p>
-                              <span className="text-base font-bold text-success">৳{p.amount.toLocaleString("bn-BD")}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
             </div>

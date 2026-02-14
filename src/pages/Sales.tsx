@@ -2,9 +2,9 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy, where
+  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy, where, getDoc
 } from "firebase/firestore";
-import { ArrowLeft, Plus, Minus, ShoppingCart, Check, Search, X, UserPlus, User, Trash2, Edit3, ChevronDown } from "lucide-react";
+import { ArrowLeft, Plus, Minus, ShoppingCart, Check, Search, X, UserPlus, User, Trash2, Edit3, ChevronDown, Banknote, ClipboardList } from "lucide-react";
 
 interface Product {
   id: string;
@@ -25,11 +25,14 @@ interface CartItem {
   product: Product;
   quantity: number;
   price: number;
+  _rawQty?: string;
 }
 
 interface Sale {
   id: string;
+  customer_id?: string;
   customer_name?: string;
+  items?: any[];
   total_amount: number;
   discount: number;
   paid_amount: number;
@@ -50,7 +53,8 @@ const Sales: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [displayedCount, setDisplayedCount] = useState(PAGE_SIZE);
 
-  // New sale state
+  // New/Edit sale state
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -70,6 +74,9 @@ const Sales: React.FC = () => {
   const [newCustPhone, setNewCustPhone] = useState("");
   const [newCustAddress, setNewCustAddress] = useState("");
   const [savingCustomer, setSavingCustomer] = useState(false);
+
+  // Edit mode flag
+  const [isEditMode, setIsEditMode] = useState(false);
 
   useEffect(() => {
     if (isNew) { loadForNewSale(); } else { loadSales(); }
@@ -108,7 +115,8 @@ const Sales: React.FC = () => {
   const total = Math.max(0, subtotal - discountNum);
   const paidNum = Number(paidAmount) || 0;
   const dueAmount = Math.max(0, total - paidNum);
-  const profit = cart.reduce((s, i) => s + (i.price - (i.product.buying_price || 0)) * i.quantity, 0) - discountNum;
+  const extraPayment = Math.max(0, paidNum - total);
+  const profit = cart.reduce((s, i) => s + (i.price - (i.product.buying_price || 0)) * i.quantity, 0) - discountNum + extraPayment;
 
   const addToCart = (p: Product) => {
     const existing = cart.find((c) => c.product.id === p.id);
@@ -119,16 +127,6 @@ const Sales: React.FC = () => {
     }
     setShowProductPicker(false);
     setSearchProduct("");
-  };
-
-  const updateQty = (productId: string, delta: number) => {
-    setCart(cart.map((c) => {
-      if (c.product.id === productId) {
-        const newQty = Math.round((c.quantity + delta) * 100) / 100;
-        return newQty <= 0 ? c : { ...c, quantity: newQty };
-      }
-      return c;
-    }));
   };
 
   const setQtyDirectly = (productId: string, value: string) => {
@@ -189,34 +187,41 @@ const Sales: React.FC = () => {
         created_at: Timestamp.now(),
       };
 
-      const saleRef = await addDoc(collection(db, "sales"), saleData);
+      if (isEditMode && editingSale) {
+        // Update existing sale
+        await updateDoc(doc(db, "sales", editingSale.id), saleData);
+        setIsEditMode(false);
+        setEditingSale(null);
+      } else {
+        // Create new sale
+        const saleRef = await addDoc(collection(db, "sales"), saleData);
 
-      // Also save to sale_items for backward compatibility
-      for (const item of cart) {
-        await addDoc(collection(db, "sale_items"), {
-          sale_id: saleRef.id, product_id: item.product.id,
-          product_name: item.product.product_name, quantity: item.quantity,
-          price: item.price, created_at: Timestamp.now(),
-        });
-        const newStock = Math.max(0, item.product.currentStock - item.quantity);
-        await updateDoc(doc(db, "products", item.product.id), { currentStock: newStock });
-      }
+        for (const item of cart) {
+          await addDoc(collection(db, "sale_items"), {
+            sale_id: saleRef.id, product_id: item.product.id,
+            product_name: item.product.product_name, quantity: item.quantity,
+            price: item.price, created_at: Timestamp.now(),
+          });
+          const newStock = Math.max(0, item.product.currentStock - item.quantity);
+          await updateDoc(doc(db, "products", item.product.id), { currentStock: newStock });
+        }
 
-      if (selectedCustomer && dueAmount > 0) {
-        const custDoc = await getDocs(query(collection(db, "customers"), where("__name__", "==", selectedCustomer.id)));
-        if (!custDoc.empty) {
-          const custData = custDoc.docs[0].data();
-          await updateDoc(doc(db, "customers", selectedCustomer.id), {
-            total_due: (custData.total_due || 0) + dueAmount,
+        if (selectedCustomer && dueAmount > 0) {
+          const custDoc = await getDocs(query(collection(db, "customers"), where("__name__", "==", selectedCustomer.id)));
+          if (!custDoc.empty) {
+            const custData = custDoc.docs[0].data();
+            await updateDoc(doc(db, "customers", selectedCustomer.id), {
+              total_due: (custData.total_due || 0) + dueAmount,
+            });
+          }
+        }
+
+        if (paidNum > 0) {
+          await addDoc(collection(db, "payments"), {
+            customer_id: selectedCustomer?.id || null, sale_id: saleRef.id,
+            amount: paidNum, payment_method: paymentType, created_at: Timestamp.now(),
           });
         }
-      }
-
-      if (paidNum > 0) {
-        await addDoc(collection(db, "payments"), {
-          customer_id: selectedCustomer?.id || null, sale_id: saleRef.id,
-          amount: paidNum, payment_method: paymentType, created_at: Timestamp.now(),
-        });
       }
 
       navigate("/sales");
@@ -232,8 +237,60 @@ const Sales: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
-  // NEW SALE FORM
-  if (isNew) {
+  const handleEditSale = async (sale: Sale) => {
+    setEditingSale(sale);
+    setIsEditMode(true);
+    setLoading(true);
+
+    try {
+      // Load products and customers
+      const [pSnap, cSnap] = await Promise.all([
+        getDocs(collection(db, "products")),
+        getDocs(collection(db, "customers")),
+      ]);
+      const pList: Product[] = [];
+      pSnap.forEach((d) => pList.push({ id: d.id, ...d.data() } as Product));
+      setProducts(pList.sort((a, b) => a.product_name.localeCompare(b.product_name)));
+
+      const cList: Customer[] = [];
+      cSnap.forEach((d) => cList.push({ id: d.id, ...d.data() } as Customer));
+      setCustomers(cList.sort((a, b) => a.name.localeCompare(b.name)));
+
+      // Populate form from sale data
+      if (sale.customer_id) {
+        const cust = cList.find(c => c.id === sale.customer_id);
+        if (cust) setSelectedCustomer(cust);
+      }
+
+      // Reconstruct cart from sale items
+      if (sale.items && sale.items.length > 0) {
+        const cartItems: CartItem[] = sale.items.map((item: any) => {
+          const product = pList.find(p => p.id === item.productId) || {
+            id: item.productId,
+            product_name: item.productName,
+            buying_price: item.wholesalePrice || 0,
+            selling_price: item.salePrice,
+            currentStock: 0,
+            unit: "",
+          };
+          return {
+            product,
+            quantity: item.quantity,
+            price: item.salePrice,
+          };
+        });
+        setCart(cartItems);
+      }
+
+      setDiscount(String(sale.discount || ""));
+      setPaidAmount(String(sale.paid_amount || ""));
+      setPaymentType(sale.payment_type || "cash");
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  };
+
+  // NEW/EDIT SALE FORM
+  if (isNew || isEditMode) {
     const filteredProducts = products.filter((p) =>
       p.product_name.toLowerCase().includes(searchProduct.toLowerCase())
     );
@@ -244,8 +301,8 @@ const Sales: React.FC = () => {
     return (
       <div className="animate-fade-in">
         <div className="flex items-center gap-3 px-4 py-4 border-b border-border bg-card">
-          <button onClick={() => navigate("/sales")} className="p-1"><ArrowLeft className="w-6 h-6 text-foreground" /></button>
-          <h2 className="text-xl font-bold text-foreground">নতুন বিক্রয়</h2>
+          <button onClick={() => { if (isEditMode) { setIsEditMode(false); setEditingSale(null); setCart([]); } else navigate("/sales"); }} className="p-1"><ArrowLeft className="w-6 h-6 text-foreground" /></button>
+          <h2 className="text-xl font-bold text-foreground">{isEditMode ? "বিক্রয় সম্পাদনা" : "নতুন বিক্রয়"}</h2>
         </div>
 
         <div className="p-4 space-y-4">
@@ -306,7 +363,7 @@ const Sales: React.FC = () => {
                         className="flex-1 h-11 rounded-xl border border-border text-base text-foreground font-medium">বাতিল</button>
                       <button onClick={handleAddNewCustomer} disabled={savingCustomer || !newCustName}
                         className="flex-1 h-11 rounded-xl bg-primary text-primary-foreground text-base font-semibold disabled:opacity-50 flex items-center justify-center gap-1">
-                        <Check className="w-4 h-4" />{savingCustomer ? "সেভ..." : "যোগ করুন"}
+                         <Check className="w-4 h-4" />{savingCustomer ? "সেভ..." : "যোগ করুন"}
                       </button>
                     </div>
                   </div>
@@ -344,7 +401,7 @@ const Sales: React.FC = () => {
               </div>
             )}
 
-            {/* Cart Items */}
+            {/* Cart Items - quantity as input box only */}
             {cart.length > 0 && (
               <div className="space-y-2">
                 {cart.map((item) => (
@@ -357,22 +414,12 @@ const Sales: React.FC = () => {
                     </div>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <button onClick={() => updateQty(item.product.id, -0.5)}
-                          className="w-9 h-9 rounded-xl bg-card border border-border flex items-center justify-center active:scale-95 text-xs font-bold">-½</button>
-                        <button onClick={() => updateQty(item.product.id, -1)}
-                          className="w-9 h-9 rounded-xl bg-card border border-border flex items-center justify-center active:scale-95">
-                          <Minus className="w-4 h-4" />
-                        </button>
+                        <label className="text-sm text-muted-foreground">পরিমাণ:</label>
                         <input type="text" inputMode="decimal"
-                          value={(item as any)._rawQty !== undefined ? (item as any)._rawQty : item.quantity}
+                          value={item._rawQty !== undefined ? item._rawQty : item.quantity}
                           onChange={(e) => setQtyDirectly(item.product.id, e.target.value)}
-                          className="w-14 h-9 text-center rounded-lg border border-input bg-background text-base font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-                        <button onClick={() => updateQty(item.product.id, 1)}
-                          className="w-9 h-9 rounded-xl bg-card border border-border flex items-center justify-center active:scale-95">
-                          <Plus className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => updateQty(item.product.id, 0.5)}
-                          className="w-9 h-9 rounded-xl bg-card border border-border flex items-center justify-center active:scale-95 text-xs font-bold">+½</button>
+                          className="w-20 h-10 text-center rounded-xl border border-input bg-background text-base font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
+                        <span className="text-sm text-muted-foreground">{item.product.unit}</span>
                       </div>
                       <span className="text-base font-bold text-foreground">৳{(item.price * item.quantity).toLocaleString()}</span>
                     </div>
@@ -401,17 +448,17 @@ const Sales: React.FC = () => {
             <label className="text-base font-semibold text-foreground mb-2 block">পেমেন্ট পদ্ধতি</label>
             <div className="flex gap-2">
               {[
-                { value: "cash", label: "💵 নগদ" },
-                { value: "due", label: "📋 বাকি" },
+                { value: "cash", label: "নগদ", icon: Banknote },
+                { value: "due", label: "বাকি", icon: ClipboardList },
               ].map((pt) => (
                 <button key={pt.value} onClick={() => {
                   setPaymentType(pt.value);
                   if (pt.value === "due") setPaidAmount("0");
                 }}
-                  className={`flex-1 py-3 rounded-xl text-base font-semibold border transition-colors ${
+                  className={`flex-1 py-3 rounded-xl text-base font-semibold border transition-colors flex items-center justify-center gap-2 ${
                     paymentType === pt.value ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"
                   }`}>
-                  {pt.label}
+                  <pt.icon className="w-4 h-4" /> {pt.label}
                 </button>
               ))}
             </div>
@@ -425,13 +472,14 @@ const Sales: React.FC = () => {
               <div className="flex justify-between text-lg font-bold border-t border-border pt-2"><span className="text-foreground">মোট</span><span className="text-primary">৳{total.toLocaleString()}</span></div>
               {paidNum > 0 && <div className="flex justify-between text-base"><span className="text-muted-foreground">প্রদান</span><span className="text-success font-semibold">৳{paidNum.toLocaleString()}</span></div>}
               {dueAmount > 0 && <div className="flex justify-between text-base"><span className="text-muted-foreground">বাকি</span><span className="text-destructive font-semibold">৳{dueAmount.toLocaleString()}</span></div>}
+              {extraPayment > 0 && <div className="flex justify-between text-base"><span className="text-muted-foreground">অতিরিক্ত (লাভ)</span><span className="text-success font-semibold">+৳{extraPayment.toLocaleString()}</span></div>}
               <div className="flex justify-between text-base border-t border-border pt-2"><span className="text-muted-foreground">লাভ</span><span className={`font-semibold ${profit >= 0 ? "text-success" : "text-destructive"}`}>৳{profit.toLocaleString()}</span></div>
             </div>
           )}
 
           <button onClick={handleSaveSale} disabled={saving || cart.length === 0}
             className="w-full h-14 rounded-xl bg-primary text-primary-foreground text-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98] transition-transform shadow-md">
-            <Check className="w-6 h-6" />{saving ? "সেভ হচ্ছে..." : "বিক্রয় সম্পন্ন করুন"}
+            <Check className="w-6 h-6" />{saving ? "সেভ হচ্ছে..." : isEditMode ? "আপডেট করুন" : "বিক্রয় সম্পন্ন করুন"}
           </button>
         </div>
       </div>
@@ -470,8 +518,8 @@ const Sales: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <h4 className="text-base font-bold text-foreground">{s.customer_name || "ক্যাশ"}</h4>
-                      <p className="text-sm text-muted-foreground">
-                        {date ? date.toLocaleDateString("bn-BD") : ""} · {s.payment_type === "cash" ? "💵 নগদ" : "📋 বাকি"}
+                      <p className="text-sm text-muted-foreground flex items-center gap-1">
+                        {date ? date.toLocaleDateString("bn-BD") : ""} · {s.payment_type === "cash" ? <><Banknote className="w-3.5 h-3.5 inline" /> নগদ</> : <><ClipboardList className="w-3.5 h-3.5 inline" /> বাকি</>}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -480,6 +528,9 @@ const Sales: React.FC = () => {
                         {s.due_amount > 0 && <p className="text-sm text-destructive font-semibold">বাকি: ৳{s.due_amount.toLocaleString("bn-BD")}</p>}
                         {(s.profit || 0) > 0 && <p className="text-xs text-success font-medium">লাভ: ৳{s.profit.toLocaleString("bn-BD")}</p>}
                       </div>
+                      <button onClick={() => handleEditSale(s)} className="p-2 rounded-lg hover:bg-primary/10">
+                        <Edit3 className="w-4 h-4 text-primary" />
+                      </button>
                       <button onClick={() => handleDeleteSale(s.id)} className="p-2 rounded-lg hover:bg-destructive/10">
                         <Trash2 className="w-4 h-4 text-destructive" />
                       </button>
