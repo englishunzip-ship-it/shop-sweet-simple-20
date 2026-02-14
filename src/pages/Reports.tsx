@@ -2,9 +2,9 @@ import React, { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import {
   collection, getDocs, query, orderBy, where, Timestamp,
-  writeBatch, doc
+  writeBatch, doc, getDoc
 } from "firebase/firestore";
-import { TrendingUp, Package, Users, Download, Calendar, ChevronDown } from "lucide-react";
+import { TrendingUp, Package, Users, Download, Calendar, ChevronDown, CalendarDays, Coins, BarChart3, Smartphone, Wallet } from "lucide-react";
 import jsPDF from "jspdf";
 
 const PAGE_SIZE = 10;
@@ -26,6 +26,7 @@ const Reports: React.FC = () => {
   const [dueCustomers, setDueCustomers] = useState<any[]>([]);
   const [allSalesForDay, setAllSalesForDay] = useState<any[]>([]);
   const [mbLogsForDay, setMbLogsForDay] = useState<any[]>([]);
+  const [mbCurrentBalance, setMbCurrentBalance] = useState(0);
   const [displayedCount, setDisplayedCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [cleanupDone, setCleanupDone] = useState(false);
@@ -69,7 +70,6 @@ const Reports: React.FC = () => {
       const monthStart = new Date(selDate.getFullYear(), selDate.getMonth(), 1);
       const monthEnd = new Date(selDate.getFullYear(), selDate.getMonth() + 1, 1);
 
-      // Daily sales
       const daySalesQ = query(collection(db, "sales"), where("created_at", ">=", Timestamp.fromDate(dayStart)), where("created_at", "<", Timestamp.fromDate(dayEnd)), orderBy("created_at", "desc"));
       const daySalesSnap = await getDocs(daySalesQ);
       let dSales = 0, dProfit = 0, dDue = 0;
@@ -90,6 +90,13 @@ const Reports: React.FC = () => {
       const mbList: any[] = [];
       mbDaySnap.forEach((d) => mbList.push({ id: d.id, ...d.data() }));
       setMbLogsForDay(mbList);
+
+      // Get current MB balance from latest log
+      const mbAllQ = query(collection(db, "mobile_banking_logs"), orderBy("created_at", "desc"));
+      const mbAllSnap = await getDocs(mbAllQ);
+      if (!mbAllSnap.empty) {
+        setMbCurrentBalance(mbAllSnap.docs[0].data().balance_after || 0);
+      }
 
       // Monthly
       const monthSalesQ = query(collection(db, "sales"), where("created_at", ">=", Timestamp.fromDate(monthStart)), where("created_at", "<", Timestamp.fromDate(monthEnd)));
@@ -117,6 +124,8 @@ const Reports: React.FC = () => {
 
   const displayedSales = allSalesForDay.slice(0, displayedCount);
   const hasMore = displayedCount < allSalesForDay.length;
+
+  const totalMBCommForDay = mbLogsForDay.reduce((s, l) => s + (l.commission || 0), 0);
 
   const generatePDF = (type: string) => {
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -166,14 +175,16 @@ const Reports: React.FC = () => {
       y += lineHeight * 1.2;
       pdf.setFontSize(10); pdf.setFont("helvetica", "normal"); pdf.setTextColor(40, 40, 40);
 
-      // Summary box with Total Sales, Number, Profit, Due
+      // Summary box with Total Sales, Number, Profit, Due, MB Commission, MB Balance
       pdf.setFillColor(240, 248, 255);
-      pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 32, 3, 3, "F");
+      pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 48, 3, 3, "F");
       pdf.text("Total Sales: Tk " + dailySales.toLocaleString(), margin + 5, y + 4);
       pdf.text("Number of Sales: " + dailyCount, margin + 5, y + 12);
       pdf.text("Total Profit: Tk " + dailyProfit.toLocaleString(), margin + 5, y + 20);
       pdf.text("Total Due: Tk " + dailyDue.toLocaleString(), margin + 5, y + 28);
-      y += 38;
+      pdf.text("Total Mobile Banking Commission: Tk " + totalMBCommForDay.toLocaleString(), margin + 5, y + 36);
+      pdf.text("Mobile Banking Current Balance: Tk " + mbCurrentBalance.toLocaleString(), margin + 5, y + 44);
+      y += 54;
 
       // Sales table
       checkPageBreak(15);
@@ -212,7 +223,6 @@ const Reports: React.FC = () => {
         pdf.text("Mobile Banking Transactions", margin, y);
         y += lineHeight * 1.2;
 
-        // MB summary by operator
         const opSummary: Record<string, { cashIn: number; cashOut: number; recharge: number; commission: number }> = {};
         mbLogsForDay.forEach((l: any) => {
           const op = l.operator || "unknown";
@@ -234,7 +244,8 @@ const Reports: React.FC = () => {
         y += lineHeight + 2;
         pdf.setTextColor(40, 40, 40); pdf.setFont("helvetica", "normal");
 
-        const opNames: Record<string, string> = { bkash: "bKash", nagad: "Nagad", rocket: "Rocket" };
+        // Operator names in English
+        const opNames: Record<string, string> = { bkash: "Bkash", nagad: "Nagad", rocket: "Rocket", dbbl: "Dutch Bangla", upay: "Upay", tap: "Tap" };
         Object.entries(opSummary).forEach(([op, data], i) => {
           checkPageBreak(lineHeight + 2);
           const bgColor = i % 2 === 0 ? [245, 255, 250] : [255, 253, 245];
@@ -249,10 +260,11 @@ const Reports: React.FC = () => {
           y += lineHeight;
         });
 
-        const totalMBComm = mbLogsForDay.reduce((s: number, l: any) => s + (l.commission || 0), 0);
         y += 2;
         pdf.setFont("helvetica", "bold"); pdf.setFontSize(10);
-        pdf.text("Total MB Commission: Tk " + totalMBComm.toLocaleString(), margin + 3, y + 1);
+        pdf.text("Total MB Commission: Tk " + totalMBCommForDay.toLocaleString(), margin + 3, y + 1);
+        y += lineHeight;
+        pdf.text("Current Balance: Tk " + mbCurrentBalance.toLocaleString(), margin + 3, y + 1);
         y += lineHeight;
       }
 
@@ -348,17 +360,19 @@ const Reports: React.FC = () => {
   };
 
   const tabs = [
-    { key: "daily" as const, label: "📅 আজ" },
-    { key: "monthly" as const, label: "📆 মাসিক" },
-    { key: "stock" as const, label: "📦 স্টক" },
-    { key: "due" as const, label: "💰 বাকি" },
+    { key: "daily" as const, label: "আজ", icon: Calendar },
+    { key: "monthly" as const, label: "মাসিক", icon: CalendarDays },
+    { key: "stock" as const, label: "স্টক", icon: Package },
+    { key: "due" as const, label: "বাকি", icon: Coins },
   ];
 
   return (
     <div className="animate-fade-in">
       <div className="px-4 py-4 bg-card border-b border-border">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xl font-bold text-foreground">📊 রিপোর্ট</h2>
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-primary" /> রিপোর্ট
+          </h2>
           <button onClick={() => generatePDF(tab)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold active:scale-95 transition-transform shadow-md">
             <Download className="w-4 h-4" /> PDF ডাউনলোড
@@ -372,9 +386,11 @@ const Reports: React.FC = () => {
         <div className="flex gap-1 bg-muted rounded-xl p-1">
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-1 ${
                 tab === t.key ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
-              }`}>{t.label}</button>
+              }`}>
+              <t.icon className="w-3.5 h-3.5" /> {t.label}
+            </button>
           ))}
         </div>
       </div>
@@ -401,7 +417,25 @@ const Reports: React.FC = () => {
               </div>
               <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm">
                 <p className="text-xs text-muted-foreground">MB কমিশন</p>
-                <p className="text-2xl font-bold text-secondary">৳{toBn(mbLogsForDay.reduce((s, l) => s + (l.commission || 0), 0).toLocaleString())}</p>
+                <p className="text-2xl font-bold text-secondary">৳{toBn(totalMBCommForDay.toLocaleString())}</p>
+              </div>
+            </div>
+
+            {/* MB Summary */}
+            <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-5 h-5 text-primary" />
+                  <span className="text-sm font-semibold text-foreground">MB টোটাল কমিশন</span>
+                </div>
+                <span className="text-base font-bold text-secondary">৳{toBn(totalMBCommForDay.toLocaleString())}</span>
+              </div>
+              <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-5 h-5 text-primary" />
+                  <span className="text-sm font-semibold text-foreground">MB বর্তমান ব্যালেন্স</span>
+                </div>
+                <span className="text-base font-bold text-primary">৳{toBn(mbCurrentBalance.toLocaleString())}</span>
               </div>
             </div>
 
@@ -469,7 +503,10 @@ const Reports: React.FC = () => {
         ) : (
           <div className="space-y-2">
             {dueCustomers.length === 0 ? (
-              <p className="text-center text-muted-foreground py-10 text-base">কোনো বাকি নেই ✅</p>
+              <div className="text-center text-muted-foreground py-10 text-base flex flex-col items-center gap-2">
+                <Coins className="w-8 h-8 text-success" />
+                <span>কোনো বাকি নেই</span>
+              </div>
             ) : (
               <>
                 <div className="bg-destructive/10 rounded-xl p-4 text-center mb-3">

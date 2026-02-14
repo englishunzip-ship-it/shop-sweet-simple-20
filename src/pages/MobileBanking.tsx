@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, addDoc, query, orderBy, Timestamp } from "firebase/firestore";
-import { ArrowLeft, ArrowDownLeft, ArrowUpRight, Plus, Smartphone, Download, RefreshCw, ChevronDown } from "lucide-react";
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, Timestamp, getDoc, setDoc } from "firebase/firestore";
+import { ArrowLeft, ArrowDownLeft, ArrowUpRight, Plus, Smartphone, Download, RefreshCw, ChevronDown, Settings, Edit3, Trash2, X, Save, CheckCircle } from "lucide-react";
 
 interface BankingLog {
   id: string;
@@ -15,17 +15,27 @@ interface BankingLog {
   created_at: any;
 }
 
-const COMMISSION_RATES: Record<string, Record<string, number>> = {
-  bkash: { cash_in: 0.01, cash_out: 0.0185, recharge: 0.02 },
-  nagad: { cash_in: 0.01, cash_out: 0.0185, recharge: 0.02 },
-  rocket: { cash_in: 0.01, cash_out: 0.018, recharge: 0.015 },
-};
+interface CommissionRates {
+  [operator: string]: { cash_in: number; cash_out: number; recharge: number };
+}
 
-const OPERATORS = [
+const DEFAULT_OPERATORS = [
   { value: "bkash", label: "বিকাশ", color: "bg-pink-500" },
   { value: "nagad", label: "নগদ", color: "bg-orange-500" },
   { value: "rocket", label: "রকেট", color: "bg-purple-500" },
+  { value: "dbbl", label: "ডাচ বাংলা", color: "bg-blue-500" },
+  { value: "upay", label: "উপায়", color: "bg-green-500" },
+  { value: "tap", label: "ট্যাপ", color: "bg-teal-500" },
 ];
+
+const DEFAULT_RATES: CommissionRates = {
+  bkash: { cash_in: 0.01, cash_out: 0.0185, recharge: 0.02 },
+  nagad: { cash_in: 0.01, cash_out: 0.0185, recharge: 0.02 },
+  rocket: { cash_in: 0.01, cash_out: 0.018, recharge: 0.015 },
+  dbbl: { cash_in: 0.01, cash_out: 0.018, recharge: 0.015 },
+  upay: { cash_in: 0.01, cash_out: 0.018, recharge: 0.015 },
+  tap: { cash_in: 0.01, cash_out: 0.018, recharge: 0.015 },
+};
 
 const PAGE_SIZE = 10;
 
@@ -34,6 +44,7 @@ const MobileBanking: React.FC = () => {
   const [logs, setLogs] = useState<BankingLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingLog, setEditingLog] = useState<BankingLog | null>(null);
   const [form, setForm] = useState({
     type: "cash_in" as "cash_in" | "cash_out" | "recharge",
     operator: "bkash",
@@ -43,8 +54,34 @@ const MobileBanking: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [currentBalance, setCurrentBalance] = useState(0);
   const [displayedCount, setDisplayedCount] = useState(PAGE_SIZE);
+  const [showSettings, setShowSettings] = useState(false);
+  const [commissionRates, setCommissionRates] = useState<CommissionRates>(DEFAULT_RATES);
+  const [editRates, setEditRates] = useState<CommissionRates>(DEFAULT_RATES);
+  const [savingRates, setSavingRates] = useState(false);
 
-  useEffect(() => { loadLogs(); }, []);
+  useEffect(() => { loadLogs(); loadCommissionRates(); }, []);
+
+  const loadCommissionRates = async () => {
+    try {
+      const docRef = doc(db, "settings", "commission_rates");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data() as CommissionRates;
+        setCommissionRates(data);
+        setEditRates(data);
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const saveCommissionRates = async () => {
+    setSavingRates(true);
+    try {
+      await setDoc(doc(db, "settings", "commission_rates"), editRates);
+      setCommissionRates(editRates);
+      setShowSettings(false);
+    } catch (e) { console.error(e); }
+    finally { setSavingRates(false); }
+  };
 
   const loadLogs = async () => {
     try {
@@ -59,7 +96,7 @@ const MobileBanking: React.FC = () => {
   };
 
   const calcCommission = (amount: number, operator: string, type: string) => {
-    const rate = COMMISSION_RATES[operator]?.[type] || 0;
+    const rate = commissionRates[operator]?.[type as keyof typeof commissionRates[string]] || 0;
     return Math.round(amount * rate * 100) / 100;
   };
 
@@ -69,21 +106,53 @@ const MobileBanking: React.FC = () => {
     setSaving(true);
     try {
       const commission = calcCommission(amount, form.operator, form.type);
-      const newBalance = form.type === "cash_in" ? currentBalance + amount : currentBalance - amount;
-      await addDoc(collection(db, "mobile_banking_logs"), {
-        type: form.type,
-        operator: form.operator,
-        amount,
-        commission,
-        balance_after: newBalance,
-        notes: form.notes,
-        created_at: Timestamp.now(),
-      });
+
+      if (editingLog) {
+        // Recalculate balance - find the log before this one
+        await updateDoc(doc(db, "mobile_banking_logs", editingLog.id), {
+          type: form.type,
+          operator: form.operator,
+          amount,
+          commission,
+          notes: form.notes,
+        });
+      } else {
+        const newBalance = form.type === "cash_in" ? currentBalance + amount : currentBalance - amount;
+        await addDoc(collection(db, "mobile_banking_logs"), {
+          type: form.type,
+          operator: form.operator,
+          amount,
+          commission,
+          balance_after: newBalance,
+          notes: form.notes,
+          created_at: Timestamp.now(),
+        });
+      }
       setShowForm(false);
+      setEditingLog(null);
       setForm({ type: "cash_in", operator: "bkash", amount: "", notes: "" });
       await loadLogs();
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
+  };
+
+  const handleEdit = (log: BankingLog) => {
+    setEditingLog(log);
+    setForm({
+      type: log.type,
+      operator: log.operator,
+      amount: String(log.amount),
+      notes: log.notes || "",
+    });
+    setShowForm(true);
+  };
+
+  const handleDelete = async (logId: string) => {
+    if (!confirm("এই লেনদেনটি মুছে ফেলতে চান?")) return;
+    try {
+      await deleteDoc(doc(db, "mobile_banking_logs", logId));
+      await loadLogs();
+    } catch (e) { console.error(e); }
   };
 
   const today = new Date();
@@ -129,17 +198,69 @@ const MobileBanking: React.FC = () => {
   };
 
   const typeLabel = (t: string) => t === "cash_in" ? "ক্যাশ ইন" : t === "cash_out" ? "ক্যাশ আউট" : "রিচার্জ";
+  const opLabel = (op: string) => DEFAULT_OPERATORS.find(o => o.value === op)?.label || op;
+
+  // Commission Settings Modal
+  if (showSettings) {
+    return (
+      <div className="animate-fade-in">
+        <div className="flex items-center gap-3 px-4 py-4 border-b border-border bg-card">
+          <button onClick={() => setShowSettings(false)} className="p-1"><ArrowLeft className="w-6 h-6 text-foreground" /></button>
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <Settings className="w-5 h-5" /> কমিশন সেটিংস
+          </h2>
+        </div>
+        <div className="p-4 space-y-4">
+          {DEFAULT_OPERATORS.map((op) => (
+            <div key={op.value} className="bg-card rounded-xl p-4 border border-border space-y-3">
+              <h4 className="text-base font-bold text-foreground">{op.label}</h4>
+              <div className="grid grid-cols-3 gap-2">
+                {(["cash_in", "cash_out", "recharge"] as const).map((type) => (
+                  <div key={type}>
+                    <label className="text-xs text-muted-foreground block mb-1">
+                      {type === "cash_in" ? "ক্যাশ ইন %" : type === "cash_out" ? "ক্যাশ আউট %" : "রিচার্জ %"}
+                    </label>
+                    <input type="number" step="0.001"
+                      value={((editRates[op.value]?.[type] || 0) * 100).toFixed(2)}
+                      onChange={(e) => {
+                        const val = Number(e.target.value) / 100;
+                        setEditRates({
+                          ...editRates,
+                          [op.value]: { ...editRates[op.value], [type]: val }
+                        });
+                      }}
+                      className="w-full h-10 px-2 rounded-lg border border-input bg-background text-sm text-foreground text-center focus:outline-none focus:ring-2 focus:ring-ring" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <button onClick={saveCommissionRates} disabled={savingRates}
+            className="w-full h-14 rounded-xl bg-primary text-primary-foreground text-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98] transition-transform">
+            <Save className="w-5 h-5" />{savingRates ? "সেভ হচ্ছে..." : "সেভ করুন"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="animate-fade-in">
       <div className="flex items-center justify-between px-4 py-4 border-b border-border bg-card">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate("/")} className="p-1"><ArrowLeft className="w-6 h-6 text-foreground" /></button>
-          <h2 className="text-xl font-bold text-foreground">📱 মোবাইল ব্যাংকিং</h2>
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            <Smartphone className="w-5 h-5 text-primary" /> মোবাইল ব্যাংকিং
+          </h2>
         </div>
-        <button onClick={downloadReport} className="p-2.5 rounded-xl text-primary hover:bg-primary/10">
-          <Download className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setShowSettings(true)} className="p-2.5 rounded-xl text-muted-foreground hover:bg-muted">
+            <Settings className="w-5 h-5" />
+          </button>
+          <button onClick={downloadReport} className="p-2.5 rounded-xl text-primary hover:bg-primary/10">
+            <Download className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       <div className="px-4 py-4 space-y-3">
@@ -174,7 +295,7 @@ const MobileBanking: React.FC = () => {
         </div>
 
         {/* New Transaction Button */}
-        <button onClick={() => setShowForm(!showForm)}
+        <button onClick={() => { setEditingLog(null); setForm({ type: "cash_in", operator: "bkash", amount: "", notes: "" }); setShowForm(!showForm); }}
           className="w-full h-14 rounded-xl bg-primary text-primary-foreground text-lg font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-md">
           <Plus className="w-5 h-5" />নতুন লেনদেন
         </button>
@@ -189,7 +310,7 @@ const MobileBanking: React.FC = () => {
                   className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition-colors ${
                     form.type === t ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"
                   }`}>
-                  {t === "cash_in" ? "⬇️ ক্যাশ ইন" : t === "cash_out" ? "⬆️ ক্যাশ আউট" : "🔄 রিচার্জ"}
+                  {t === "cash_in" ? "ক্যাশ ইন" : t === "cash_out" ? "ক্যাশ আউট" : "রিচার্জ"}
                 </button>
               ))}
             </div>
@@ -197,10 +318,10 @@ const MobileBanking: React.FC = () => {
             {/* Operator */}
             <div>
               <label className="text-sm font-semibold text-foreground mb-1.5 block">অপারেটর</label>
-              <div className="flex gap-2">
-                {OPERATORS.map((op) => (
+              <div className="grid grid-cols-3 gap-2">
+                {DEFAULT_OPERATORS.map((op) => (
                   <button key={op.value} onClick={() => setForm({ ...form, operator: op.value })}
-                    className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition-colors ${
+                    className={`py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
                       form.operator === op.value ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"
                     }`}>
                     {op.label}
@@ -228,15 +349,25 @@ const MobileBanking: React.FC = () => {
               placeholder="কাস্টমার নম্বর / নোট (ঐচ্ছিক)" />
 
             <button onClick={handleSave} disabled={saving || !form.amount}
-              className="w-full h-14 rounded-xl bg-success text-success-foreground text-lg font-bold disabled:opacity-50 active:scale-[0.98] transition-transform">
-              {saving ? "সেভ হচ্ছে..." : "✅ সেভ করুন"}
+              className="w-full h-14 rounded-xl bg-success text-success-foreground text-lg font-bold disabled:opacity-50 active:scale-[0.98] transition-transform flex items-center justify-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              {saving ? "সেভ হচ্ছে..." : editingLog ? "আপডেট করুন" : "সেভ করুন"}
             </button>
+
+            {editingLog && (
+              <button onClick={() => { setEditingLog(null); setShowForm(false); setForm({ type: "cash_in", operator: "bkash", amount: "", notes: "" }); }}
+                className="w-full h-12 rounded-xl border border-border text-foreground text-base font-medium">
+                বাতিল
+              </button>
+            )}
           </div>
         )}
 
         {/* Transaction History */}
         <div className="space-y-2 mt-4">
-          <h3 className="text-base font-bold text-foreground">📜 লেনদেন ইতিহাস</h3>
+          <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-primary" /> লেনদেন ইতিহাস
+          </h3>
           {displayedLogs.length === 0 ? (
             <div className="text-center py-8">
               <Smartphone className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
@@ -244,33 +375,44 @@ const MobileBanking: React.FC = () => {
             </div>
           ) : displayedLogs.map((l) => {
             const date = l.created_at?.toDate?.();
-            const opLabel = OPERATORS.find(o => o.value === l.operator)?.label || l.operator || "";
             return (
-              <div key={l.id} className="bg-card rounded-xl p-4 border border-border flex justify-between items-center shadow-sm">
-                <div className="flex items-center gap-3">
-                  {l.type === "cash_in" ? (
-                    <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
-                      <ArrowDownLeft className="w-5 h-5 text-success" />
+              <div key={l.id} className="bg-card rounded-xl p-4 border border-border shadow-sm">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    {l.type === "cash_in" ? (
+                      <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
+                        <ArrowDownLeft className="w-5 h-5 text-success" />
+                      </div>
+                    ) : l.type === "cash_out" ? (
+                      <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center">
+                        <ArrowUpRight className="w-5 h-5 text-destructive" />
+                      </div>
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-info/10 flex items-center justify-center">
+                        <RefreshCw className="w-5 h-5 text-info" />
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-base font-semibold text-foreground">{typeLabel(l.type)}</p>
+                      <p className="text-sm text-muted-foreground">{opLabel(l.operator)} {date ? `· ${date.toLocaleDateString("bn-BD")}` : ""} {l.notes && `· ${l.notes}`}</p>
                     </div>
-                  ) : l.type === "cash_out" ? (
-                    <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center">
-                      <ArrowUpRight className="w-5 h-5 text-destructive" />
-                    </div>
-                  ) : (
-                    <div className="w-10 h-10 rounded-xl bg-info/10 flex items-center justify-center">
-                      <RefreshCw className="w-5 h-5 text-info" />
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-base font-semibold text-foreground">{typeLabel(l.type)}</p>
-                    <p className="text-sm text-muted-foreground">{opLabel} {date ? `· ${date.toLocaleDateString("bn-BD")}` : ""} {l.notes && `· ${l.notes}`}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-base font-bold ${l.type === "cash_in" ? "text-success" : l.type === "cash_out" ? "text-destructive" : "text-info"}`}>
+                      {l.type === "cash_in" ? "+" : "-"}৳{l.amount.toLocaleString("bn-BD")}
+                    </p>
+                    {(l.commission || 0) > 0 && <p className="text-xs text-secondary font-semibold">কমিশন: ৳{l.commission.toLocaleString("bn-BD")}</p>}
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className={`text-base font-bold ${l.type === "cash_in" ? "text-success" : l.type === "cash_out" ? "text-destructive" : "text-info"}`}>
-                    {l.type === "cash_in" ? "+" : "-"}৳{l.amount.toLocaleString("bn-BD")}
-                  </p>
-                  {(l.commission || 0) > 0 && <p className="text-xs text-secondary font-semibold">কমিশন: ৳{l.commission.toLocaleString("bn-BD")}</p>}
+                <div className="flex gap-2 mt-2 pt-2 border-t border-border">
+                  <button onClick={() => handleEdit(l)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium text-primary bg-primary/5 hover:bg-primary/10">
+                    <Edit3 className="w-4 h-4" /> এডিট
+                  </button>
+                  <button onClick={() => handleDelete(l.id)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium text-destructive bg-destructive/5 hover:bg-destructive/10">
+                    <Trash2 className="w-4 h-4" /> মুছুন
+                  </button>
                 </div>
               </div>
             );

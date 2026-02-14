@@ -14,7 +14,7 @@ export default {
     },
     extend: {
       fontFamily: {
-        bangla: ['"Hind Siliguri"', 'sans-serif'],
+        bangla: ['"Noto Sans Bengali"', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",
