@@ -2,15 +2,35 @@ import React, { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import {
   collection, getDocs, query, orderBy, where, Timestamp,
-  writeBatch, doc, getDoc
+  writeBatch
 } from "firebase/firestore";
-import { TrendingUp, Package, Users, Download, Calendar, ChevronDown, CalendarDays, Coins, BarChart3, Smartphone, Wallet } from "lucide-react";
+import { TrendingUp, Package, Users, Download, Calendar, ChevronDown, CalendarDays, Coins, BarChart3, Smartphone, Wallet, DollarSign } from "lucide-react";
 import jsPDF from "jspdf";
 
 const PAGE_SIZE = 10;
 const CLEANUP_DAYS = 40;
 
 const toBn = (n: number | string) => String(n).replace(/\d/g, (d) => "০১২৩৪৫৬৭৮৯"[+d]);
+
+// Load Noto Sans Bengali font for PDF
+const loadBengaliFont = async (pdf: jsPDF) => {
+  try {
+    const response = await fetch('/fonts/NotoSansBengali-Regular.ttf');
+    const buffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+    pdf.addFileToVFS('NotoSansBengali-Regular.ttf', base64);
+    pdf.addFont('NotoSansBengali-Regular.ttf', 'NotoSansBengali', 'normal');
+    return true;
+  } catch (e) {
+    console.error('Font load error:', e);
+    return false;
+  }
+};
 
 const Reports: React.FC = () => {
   const [tab, setTab] = useState<"daily" | "monthly" | "stock" | "due">("daily");
@@ -41,22 +61,12 @@ const Reports: React.FC = () => {
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - CLEANUP_DAYS);
       const cutoffTs = Timestamp.fromDate(cutoff);
-      const oldSalesQ = query(collection(db, "sales"), where("created_at", "<", cutoffTs));
+      const oldSalesQ = query(collection(db, "sales"), where("createdAt", "<", cutoffTs));
       const oldSnap = await getDocs(oldSalesQ);
       if (oldSnap.empty) return;
-      const saleIds = oldSnap.docs.map(d => d.id);
       const batch = writeBatch(db);
       let count = 0;
       for (const saleDoc of oldSnap.docs) { batch.delete(saleDoc.ref); count++; if (count >= 400) break; }
-      if (saleIds.length > 0) {
-        const chunks = [];
-        for (let i = 0; i < Math.min(saleIds.length, 30); i += 10) chunks.push(saleIds.slice(i, i + 10));
-        for (const chunk of chunks) {
-          const itemsQ = query(collection(db, "sale_items"), where("sale_id", "in", chunk));
-          const itemsSnap = await getDocs(itemsQ);
-          itemsSnap.forEach(d => { if (count < 450) { batch.delete(d.ref); count++; } });
-        }
-      }
       await batch.commit();
     } catch (e) { console.error("Cleanup error:", e); }
   };
@@ -70,39 +80,39 @@ const Reports: React.FC = () => {
       const monthStart = new Date(selDate.getFullYear(), selDate.getMonth(), 1);
       const monthEnd = new Date(selDate.getFullYear(), selDate.getMonth() + 1, 1);
 
-      const daySalesQ = query(collection(db, "sales"), where("created_at", ">=", Timestamp.fromDate(dayStart)), where("created_at", "<", Timestamp.fromDate(dayEnd)), orderBy("created_at", "desc"));
+      const daySalesQ = query(collection(db, "sales"), where("createdAt", ">=", Timestamp.fromDate(dayStart)), where("createdAt", "<", Timestamp.fromDate(dayEnd)), orderBy("createdAt", "desc"));
       const daySalesSnap = await getDocs(daySalesQ);
       let dSales = 0, dProfit = 0, dDue = 0;
       const dayList: any[] = [];
       daySalesSnap.forEach((d) => {
         const data = { id: d.id, ...d.data() };
         dayList.push(data);
-        dSales += (data as any).total_amount || 0;
+        dSales += (data as any).totalAmount || 0;
         dProfit += (data as any).profit || 0;
-        dDue += (data as any).due_amount || 0;
+        dDue += (data as any).dueAmount || 0;
       });
       setDailySales(dSales); setDailyCount(dayList.length); setDailyProfit(dProfit); setDailyDue(dDue);
       setAllSalesForDay(dayList); setDisplayedCount(PAGE_SIZE);
 
       // Daily mobile banking
-      const mbDayQ = query(collection(db, "mobile_banking_logs"), where("created_at", ">=", Timestamp.fromDate(dayStart)), where("created_at", "<", Timestamp.fromDate(dayEnd)), orderBy("created_at", "desc"));
+      const mbDayQ = query(collection(db, "mobileBanking"), where("createdAt", ">=", Timestamp.fromDate(dayStart)), where("createdAt", "<", Timestamp.fromDate(dayEnd)), orderBy("createdAt", "desc"));
       const mbDaySnap = await getDocs(mbDayQ);
       const mbList: any[] = [];
       mbDaySnap.forEach((d) => mbList.push({ id: d.id, ...d.data() }));
       setMbLogsForDay(mbList);
 
       // Get current MB balance from latest log
-      const mbAllQ = query(collection(db, "mobile_banking_logs"), orderBy("created_at", "desc"));
+      const mbAllQ = query(collection(db, "mobileBanking"), orderBy("createdAt", "desc"));
       const mbAllSnap = await getDocs(mbAllQ);
       if (!mbAllSnap.empty) {
-        setMbCurrentBalance(mbAllSnap.docs[0].data().balance_after || 0);
+        setMbCurrentBalance(mbAllSnap.docs[0].data().currentBalance || 0);
       }
 
       // Monthly
-      const monthSalesQ = query(collection(db, "sales"), where("created_at", ">=", Timestamp.fromDate(monthStart)), where("created_at", "<", Timestamp.fromDate(monthEnd)));
+      const monthSalesQ = query(collection(db, "sales"), where("createdAt", ">=", Timestamp.fromDate(monthStart)), where("createdAt", "<", Timestamp.fromDate(monthEnd)));
       const monthSnap = await getDocs(monthSalesQ);
       let mSales = 0, mProfit = 0;
-      monthSnap.forEach((d) => { const data = d.data(); mSales += data.total_amount || 0; mProfit += data.profit || 0; });
+      monthSnap.forEach((d) => { const data = d.data(); mSales += data.totalAmount || 0; mProfit += data.profit || 0; });
       setMonthlySales(mSales); setMonthlyCount(monthSnap.size); setMonthlyProfit(mProfit);
 
       // Stock
@@ -115,8 +125,8 @@ const Reports: React.FC = () => {
       // Due
       const custSnap = await getDocs(collection(db, "customers"));
       const dues: any[] = [];
-      custSnap.forEach((d) => { const c = d.data(); if (c.total_due > 0) dues.push({ id: d.id, ...c }); });
-      dues.sort((a, b) => b.total_due - a.total_due);
+      custSnap.forEach((d) => { const c = d.data(); if (c.totalDue > 0) dues.push({ id: d.id, ...c }); });
+      dues.sort((a, b) => b.totalDue - a.totalDue);
       setDueCustomers(dues);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -126,9 +136,13 @@ const Reports: React.FC = () => {
   const hasMore = displayedCount < allSalesForDay.length;
 
   const totalMBCommForDay = mbLogsForDay.reduce((s, l) => s + (l.commission || 0), 0);
+  const totalIncome = dailyProfit + totalMBCommForDay;
 
-  const generatePDF = (type: string) => {
+  const generatePDF = async (type: string) => {
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const hasBengaliFont = await loadBengaliFont(pdf);
+    const fontName = hasBengaliFont ? 'NotoSansBengali' : 'helvetica';
+
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
     const margin = 15;
@@ -155,7 +169,7 @@ const Reports: React.FC = () => {
     const addNewPage = () => { pdf.addPage(); drawNotebookPage(); y = margin + 5; };
     const checkPageBreak = (needed: number) => { if (y + needed > pageHeight - margin) addNewPage(); };
 
-    pdf.setFont("helvetica", "bold");
+    pdf.setFont(fontName, "normal");
     const selDateObj = new Date(selectedDate);
 
     y = 25;
@@ -170,35 +184,37 @@ const Reports: React.FC = () => {
     pdf.setTextColor(40, 40, 40);
 
     if (type === "daily") {
-      pdf.setFontSize(13); pdf.setFont("helvetica", "bold"); pdf.setTextColor(30, 58, 138);
+      pdf.setFontSize(13); pdf.setFont(fontName, "normal"); pdf.setTextColor(30, 58, 138);
       pdf.text("Daily Sales Report", margin, y);
       y += lineHeight * 1.2;
-      pdf.setFontSize(10); pdf.setFont("helvetica", "normal"); pdf.setTextColor(40, 40, 40);
+      pdf.setFontSize(10); pdf.setFont(fontName, "normal"); pdf.setTextColor(40, 40, 40);
 
-      // Summary box with Total Sales, Number, Profit, Due, MB Commission, MB Balance
+      // Summary box
       pdf.setFillColor(240, 248, 255);
-      pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 48, 3, 3, "F");
+      pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 56, 3, 3, "F");
       pdf.text("Total Sales: Tk " + dailySales.toLocaleString(), margin + 5, y + 4);
-      pdf.text("Number of Sales: " + dailyCount, margin + 5, y + 12);
-      pdf.text("Total Profit: Tk " + dailyProfit.toLocaleString(), margin + 5, y + 20);
-      pdf.text("Total Due: Tk " + dailyDue.toLocaleString(), margin + 5, y + 28);
-      pdf.text("Total Mobile Banking Commission: Tk " + totalMBCommForDay.toLocaleString(), margin + 5, y + 36);
-      pdf.text("Mobile Banking Current Balance: Tk " + mbCurrentBalance.toLocaleString(), margin + 5, y + 44);
-      y += 54;
+      pdf.text("Total Sales Profit: Tk " + dailyProfit.toLocaleString(), margin + 5, y + 12);
+      pdf.text("Total Mobile Banking Commission: Tk " + totalMBCommForDay.toLocaleString(), margin + 5, y + 20);
+      pdf.text("Mobile Banking Current Balance: Tk " + mbCurrentBalance.toLocaleString(), margin + 5, y + 28);
+      pdf.text("Total Due: Tk " + dailyDue.toLocaleString(), margin + 5, y + 36);
+      pdf.setFont(fontName, "normal"); pdf.setFontSize(11);
+      pdf.setTextColor(16, 100, 60);
+      pdf.text("Total Income (Sales + Commission): Tk " + totalIncome.toLocaleString(), margin + 5, y + 46);
+      pdf.setFontSize(10); pdf.setTextColor(40, 40, 40);
+      y += 62;
 
       // Sales table
       checkPageBreak(15);
       pdf.setFillColor(30, 58, 138);
       pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 9, 2, 2, "F");
-      pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(9);
+      pdf.setTextColor(255, 255, 255); pdf.setFont(fontName, "normal"); pdf.setFontSize(9);
       pdf.text("SL", margin + 3, y + 3);
       pdf.text("Customer", margin + 15, y + 3);
       pdf.text("Amount", margin + 80, y + 3);
       pdf.text("Profit", margin + 110, y + 3);
-      pdf.text("Payment", margin + 135, y + 3);
-      pdf.text("Due", margin + 158, y + 3);
+      pdf.text("Due", margin + 140, y + 3);
       y += lineHeight + 2;
-      pdf.setTextColor(40, 40, 40); pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(40, 40, 40); pdf.setFont(fontName, "normal");
 
       allSalesForDay.forEach((s, i) => {
         checkPageBreak(lineHeight + 2);
@@ -207,11 +223,10 @@ const Reports: React.FC = () => {
         pdf.rect(margin, y - 4, pageWidth - margin * 2, lineHeight, "F");
         pdf.setFontSize(9);
         pdf.text(String(i + 1), margin + 3, y + 1);
-        pdf.text(String(s.customer_name || "Cash").substring(0, 20), margin + 15, y + 1);
-        pdf.text("Tk " + (s.total_amount || 0).toLocaleString(), margin + 80, y + 1);
+        pdf.text(String(s.customerName || "Cash").substring(0, 25), margin + 15, y + 1);
+        pdf.text("Tk " + (s.totalAmount || 0).toLocaleString(), margin + 80, y + 1);
         pdf.text("Tk " + (s.profit || 0).toLocaleString(), margin + 110, y + 1);
-        pdf.text(s.payment_type === "cash" ? "Cash" : "Due", margin + 135, y + 1);
-        pdf.text(s.due_amount > 0 ? "Tk " + s.due_amount.toLocaleString() : "-", margin + 158, y + 1);
+        pdf.text(s.dueAmount > 0 ? "Tk " + s.dueAmount.toLocaleString() : "-", margin + 140, y + 1);
         y += lineHeight;
       });
 
@@ -219,7 +234,7 @@ const Reports: React.FC = () => {
       if (mbLogsForDay.length > 0) {
         y += lineHeight;
         checkPageBreak(30);
-        pdf.setFontSize(12); pdf.setFont("helvetica", "bold"); pdf.setTextColor(16, 185, 129);
+        pdf.setFontSize(12); pdf.setFont(fontName, "normal"); pdf.setTextColor(16, 185, 129);
         pdf.text("Mobile Banking Transactions", margin, y);
         y += lineHeight * 1.2;
 
@@ -235,16 +250,15 @@ const Reports: React.FC = () => {
 
         pdf.setFillColor(16, 185, 129);
         pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 9, 2, 2, "F");
-        pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(9);
+        pdf.setTextColor(255, 255, 255); pdf.setFont(fontName, "normal"); pdf.setFontSize(9);
         pdf.text("Operator", margin + 3, y + 3);
         pdf.text("Cash In", margin + 40, y + 3);
         pdf.text("Cash Out", margin + 75, y + 3);
         pdf.text("Recharge", margin + 110, y + 3);
         pdf.text("Commission", margin + 145, y + 3);
         y += lineHeight + 2;
-        pdf.setTextColor(40, 40, 40); pdf.setFont("helvetica", "normal");
+        pdf.setTextColor(40, 40, 40); pdf.setFont(fontName, "normal");
 
-        // Operator names in English
         const opNames: Record<string, string> = { bkash: "Bkash", nagad: "Nagad", rocket: "Rocket", dbbl: "Dutch Bangla", upay: "Upay", tap: "Tap" };
         Object.entries(opSummary).forEach(([op, data], i) => {
           checkPageBreak(lineHeight + 2);
@@ -259,20 +273,13 @@ const Reports: React.FC = () => {
           pdf.text("Tk " + data.commission.toLocaleString(), margin + 145, y + 1);
           y += lineHeight;
         });
-
-        y += 2;
-        pdf.setFont("helvetica", "bold"); pdf.setFontSize(10);
-        pdf.text("Total MB Commission: Tk " + totalMBCommForDay.toLocaleString(), margin + 3, y + 1);
-        y += lineHeight;
-        pdf.text("Current Balance: Tk " + mbCurrentBalance.toLocaleString(), margin + 3, y + 1);
-        y += lineHeight;
       }
 
     } else if (type === "monthly") {
-      pdf.setFontSize(13); pdf.setFont("helvetica", "bold"); pdf.setTextColor(30, 58, 138);
+      pdf.setFontSize(13); pdf.setFont(fontName, "normal"); pdf.setTextColor(30, 58, 138);
       pdf.text("Monthly Sales Report", margin, y);
       y += lineHeight * 1.5;
-      pdf.setFontSize(11); pdf.setFont("helvetica", "normal"); pdf.setTextColor(40, 40, 40);
+      pdf.setFontSize(11); pdf.setFont(fontName, "normal"); pdf.setTextColor(40, 40, 40);
       pdf.setFillColor(240, 245, 255);
       pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 30, 3, 3, "F");
       pdf.text("Total Sales: Tk " + monthlySales.toLocaleString(), margin + 5, y + 5);
@@ -281,30 +288,30 @@ const Reports: React.FC = () => {
       y += 38;
 
     } else if (type === "stock") {
-      pdf.setFontSize(13); pdf.setFont("helvetica", "bold"); pdf.setTextColor(120, 80, 30);
+      pdf.setFontSize(13); pdf.setFont(fontName, "normal"); pdf.setTextColor(120, 80, 30);
       pdf.text("Stock Report", margin, y);
       y += lineHeight * 1.2;
       checkPageBreak(15);
       pdf.setFillColor(80, 120, 60);
       pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 9, 2, 2, "F");
-      pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(9);
+      pdf.setTextColor(255, 255, 255); pdf.setFont(fontName, "normal"); pdf.setFontSize(9);
       pdf.text("SL", margin + 3, y + 3);
       pdf.text("Product", margin + 15, y + 3);
       pdf.text("Stock", margin + 100, y + 3);
       pdf.text("Unit", margin + 125, y + 3);
       pdf.text("Status", margin + 145, y + 3);
       y += lineHeight + 2;
-      pdf.setTextColor(40, 40, 40); pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(40, 40, 40); pdf.setFont(fontName, "normal");
 
       stockItems.forEach((p, i) => {
         checkPageBreak(lineHeight + 2);
-        const isLow = p.currentStock <= (p.lowStockLimit || 5);
+        const isLow = p.currentStock <= (p.stockLimit || 5);
         const bgColor = isLow ? [255, 240, 240] : i % 2 === 0 ? [255, 253, 245] : [245, 255, 245];
         pdf.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
         pdf.rect(margin, y - 4, pageWidth - margin * 2, lineHeight, "F");
         pdf.setFontSize(9);
         pdf.text(String(i + 1), margin + 3, y + 1);
-        pdf.text(String(p.product_name || ""), margin + 15, y + 1);
+        pdf.text(String(p.name || ""), margin + 15, y + 1);
         pdf.text(String(p.currentStock), margin + 100, y + 1);
         pdf.text(String(p.unit || ""), margin + 125, y + 1);
         pdf.setTextColor(isLow ? 200 : 30, isLow ? 50 : 130, isLow ? 50 : 50);
@@ -314,11 +321,11 @@ const Reports: React.FC = () => {
       });
 
     } else if (type === "due") {
-      pdf.setFontSize(13); pdf.setFont("helvetica", "bold"); pdf.setTextColor(160, 50, 50);
+      pdf.setFontSize(13); pdf.setFont(fontName, "normal"); pdf.setTextColor(160, 50, 50);
       pdf.text("Due Report", margin, y);
       y += lineHeight * 1.2;
-      const totalD = dueCustomers.reduce((s, c) => s + c.total_due, 0);
-      pdf.setFontSize(11); pdf.setFont("helvetica", "normal");
+      const totalD = dueCustomers.reduce((s, c) => s + c.totalDue, 0);
+      pdf.setFontSize(11); pdf.setFont(fontName, "normal");
       pdf.setFillColor(255, 240, 240);
       pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 14, 3, 3, "F");
       pdf.text("Total Due: Tk " + totalD.toLocaleString(), margin + 5, y + 6);
@@ -327,13 +334,13 @@ const Reports: React.FC = () => {
       checkPageBreak(15);
       pdf.setFillColor(160, 60, 60);
       pdf.roundedRect(margin, y - 3, pageWidth - margin * 2, 9, 2, 2, "F");
-      pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(9);
+      pdf.setTextColor(255, 255, 255); pdf.setFont(fontName, "normal"); pdf.setFontSize(9);
       pdf.text("SL", margin + 3, y + 3);
       pdf.text("Customer", margin + 15, y + 3);
       pdf.text("Phone", margin + 85, y + 3);
       pdf.text("Due Amount", margin + 130, y + 3);
       y += lineHeight + 2;
-      pdf.setTextColor(40, 40, 40); pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(40, 40, 40); pdf.setFont(fontName, "normal");
 
       dueCustomers.forEach((c, i) => {
         checkPageBreak(lineHeight + 2);
@@ -345,7 +352,7 @@ const Reports: React.FC = () => {
         pdf.text(String(c.name || ""), margin + 15, y + 1);
         pdf.text(String(c.phone || "N/A"), margin + 85, y + 1);
         pdf.setTextColor(180, 40, 40);
-        pdf.text("Tk " + c.total_due.toLocaleString(), margin + 130, y + 1);
+        pdf.text("Tk " + c.totalDue.toLocaleString(), margin + 130, y + 1);
         pdf.setTextColor(40, 40, 40);
         y += lineHeight;
       });
@@ -403,54 +410,51 @@ const Reports: React.FC = () => {
             {/* Daily summary cards */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm">
+                <TrendingUp className="w-5 h-5 text-primary mx-auto mb-1" />
                 <p className="text-xs text-muted-foreground">মোট বিক্রয়</p>
                 <p className="text-2xl font-bold text-primary">৳{toBn(dailySales.toLocaleString())}</p>
                 <p className="text-xs text-muted-foreground">{toBn(dailyCount)} টি</p>
               </div>
               <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm">
-                <p className="text-xs text-muted-foreground">মোট লাভ</p>
+                <DollarSign className="w-5 h-5 text-success mx-auto mb-1" />
+                <p className="text-xs text-muted-foreground">বিক্রয় লাভ</p>
                 <p className={`text-2xl font-bold ${dailyProfit >= 0 ? "text-success" : "text-destructive"}`}>৳{toBn(dailyProfit.toLocaleString())}</p>
               </div>
               <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm">
-                <p className="text-xs text-muted-foreground">মোট বাকি</p>
-                <p className="text-2xl font-bold text-destructive">৳{toBn(dailyDue.toLocaleString())}</p>
-              </div>
-              <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm">
+                <Smartphone className="w-5 h-5 text-secondary mx-auto mb-1" />
                 <p className="text-xs text-muted-foreground">MB কমিশন</p>
                 <p className="text-2xl font-bold text-secondary">৳{toBn(totalMBCommForDay.toLocaleString())}</p>
               </div>
-            </div>
-
-            {/* MB Summary */}
-            <div className="bg-card rounded-xl p-4 border border-border shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Smartphone className="w-5 h-5 text-primary" />
-                  <span className="text-sm font-semibold text-foreground">MB টোটাল কমিশন</span>
-                </div>
-                <span className="text-base font-bold text-secondary">৳{toBn(totalMBCommForDay.toLocaleString())}</span>
+              <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm">
+                <Wallet className="w-5 h-5 text-info mx-auto mb-1" />
+                <p className="text-xs text-muted-foreground">MB ব্যালেন্স</p>
+                <p className="text-2xl font-bold text-info">৳{toBn(mbCurrentBalance.toLocaleString())}</p>
               </div>
-              <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
-                <div className="flex items-center gap-2">
-                  <Wallet className="w-5 h-5 text-primary" />
-                  <span className="text-sm font-semibold text-foreground">MB বর্তমান ব্যালেন্স</span>
-                </div>
-                <span className="text-base font-bold text-primary">৳{toBn(mbCurrentBalance.toLocaleString())}</span>
+              <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm">
+                <Coins className="w-5 h-5 text-destructive mx-auto mb-1" />
+                <p className="text-xs text-muted-foreground">মোট বাকি</p>
+                <p className="text-2xl font-bold text-destructive">৳{toBn(dailyDue.toLocaleString())}</p>
+              </div>
+              <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm bg-success/5">
+                <TrendingUp className="w-5 h-5 text-success mx-auto mb-1" />
+                <p className="text-xs text-muted-foreground">মোট আয়</p>
+                <p className="text-2xl font-bold text-success">৳{toBn(totalIncome.toLocaleString())}</p>
+                <p className="text-[10px] text-muted-foreground">বিক্রয় + কমিশন</p>
               </div>
             </div>
 
             <div className="space-y-2">
               {displayedSales.map((s) => {
-                const date = s.created_at?.toDate?.();
+                const date = s.createdAt?.toDate?.();
                 return (
                   <div key={s.id} className="bg-card rounded-xl p-3 border border-border flex justify-between items-center shadow-sm">
                     <div>
-                      <p className="text-base font-medium text-foreground">{s.customer_name || "ক্যাশ"}</p>
+                      <p className="text-base font-medium text-foreground">{s.customerName || "ক্যাশ"}</p>
                       <p className="text-sm text-muted-foreground">{date ? date.toLocaleTimeString("bn-BD", { hour: "2-digit", minute: "2-digit" }) : ""}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-base font-bold text-foreground">৳{toBn((s.total_amount || 0).toLocaleString())}</p>
-                      {s.due_amount > 0 && <p className="text-xs text-destructive font-semibold">বাকি: ৳{toBn(s.due_amount.toLocaleString())}</p>}
+                      <p className="text-base font-bold text-foreground">৳{toBn((s.totalAmount || 0).toLocaleString())}</p>
+                      {s.dueAmount > 0 && <p className="text-xs text-destructive font-semibold">বাকি: ৳{toBn(s.dueAmount.toLocaleString())}</p>}
                       {(s.profit || 0) > 0 && <p className="text-xs text-success font-medium">লাভ: ৳{toBn(s.profit.toLocaleString())}</p>}
                     </div>
                   </div>
@@ -491,10 +495,10 @@ const Reports: React.FC = () => {
             ) : stockItems.map((p) => (
               <div key={p.id} className="bg-card rounded-xl p-4 border border-border flex justify-between items-center shadow-sm">
                 <div>
-                  <span className="text-base font-medium text-foreground">{p.product_name}</span>
-                  <p className="text-sm text-muted-foreground">ক্রয়: ৳{toBn(p.buying_price)} | বিক্রয়: ৳{toBn(p.selling_price)}</p>
+                  <span className="text-base font-medium text-foreground">{p.name}</span>
+                  <p className="text-sm text-muted-foreground">ক্রয়: ৳{toBn(p.wholesalePrice)} | বিক্রয়: ৳{toBn(p.salePrice)}</p>
                 </div>
-                <span className={`text-base font-bold px-2 py-1 rounded-lg ${p.currentStock <= (p.lowStockLimit || 5) ? "text-destructive bg-destructive/10" : "text-success bg-success/10"}`}>
+                <span className={`text-base font-bold px-2 py-1 rounded-lg ${p.currentStock <= (p.stockLimit || 5) ? "text-destructive bg-destructive/10" : "text-success bg-success/10"}`}>
                   {toBn(p.currentStock)} {p.unit}
                 </span>
               </div>
@@ -511,7 +515,7 @@ const Reports: React.FC = () => {
               <>
                 <div className="bg-destructive/10 rounded-xl p-4 text-center mb-3">
                   <p className="text-base text-muted-foreground">মোট বকেয়া</p>
-                  <p className="text-3xl font-bold text-destructive">৳{toBn(dueCustomers.reduce((s, c) => s + c.total_due, 0).toLocaleString())}</p>
+                  <p className="text-3xl font-bold text-destructive">৳{toBn(dueCustomers.reduce((s, c) => s + c.totalDue, 0).toLocaleString())}</p>
                 </div>
                 {dueCustomers.map((c) => (
                   <div key={c.id} className="bg-card rounded-xl p-4 border border-border flex justify-between items-center shadow-sm">
@@ -519,7 +523,7 @@ const Reports: React.FC = () => {
                       <p className="text-base font-semibold text-foreground">{c.name}</p>
                       <p className="text-sm text-muted-foreground">{c.phone || "ফোন নেই"}</p>
                     </div>
-                    <span className="text-base font-bold text-destructive">৳{toBn(c.total_due.toLocaleString())}</span>
+                    <span className="text-base font-bold text-destructive">৳{toBn(c.totalDue.toLocaleString())}</span>
                   </div>
                 ))}
               </>

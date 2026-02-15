@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, Timestamp, getDoc, setDoc } from "firebase/firestore";
-import { ArrowLeft, ArrowDownLeft, ArrowUpRight, Plus, Smartphone, Download, RefreshCw, ChevronDown, Settings, Edit3, Trash2, X, Save, CheckCircle } from "lucide-react";
+import { ArrowLeft, ArrowDownLeft, ArrowUpRight, Plus, Smartphone, Download, RefreshCw, ChevronDown, Settings, Edit3, Trash2, Save, CheckCircle } from "lucide-react";
 
 interface BankingLog {
   id: string;
@@ -10,9 +10,9 @@ interface BankingLog {
   operator: string;
   amount: number;
   commission: number;
-  balance_after: number;
-  notes: string;
-  created_at: any;
+  currentBalance: number;
+  note: string;
+  createdAt: any;
 }
 
 interface CommissionRates {
@@ -49,7 +49,7 @@ const MobileBanking: React.FC = () => {
     type: "cash_in" as "cash_in" | "cash_out" | "recharge",
     operator: "bkash",
     amount: "",
-    notes: "",
+    note: "",
   });
   const [saving, setSaving] = useState(false);
   const [currentBalance, setCurrentBalance] = useState(0);
@@ -85,12 +85,12 @@ const MobileBanking: React.FC = () => {
 
   const loadLogs = async () => {
     try {
-      const q = query(collection(db, "mobile_banking_logs"), orderBy("created_at", "desc"));
+      const q = query(collection(db, "mobileBanking"), orderBy("createdAt", "desc"));
       const snap = await getDocs(q);
       const list: BankingLog[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as BankingLog));
       setLogs(list);
-      if (list.length > 0) setCurrentBalance(list[0].balance_after || 0);
+      if (list.length > 0) setCurrentBalance(list[0].currentBalance || 0);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -108,29 +108,28 @@ const MobileBanking: React.FC = () => {
       const commission = calcCommission(amount, form.operator, form.type);
 
       if (editingLog) {
-        // Recalculate balance - find the log before this one
-        await updateDoc(doc(db, "mobile_banking_logs", editingLog.id), {
+        await updateDoc(doc(db, "mobileBanking", editingLog.id), {
           type: form.type,
           operator: form.operator,
           amount,
           commission,
-          notes: form.notes,
+          note: form.note,
         });
       } else {
         const newBalance = form.type === "cash_in" ? currentBalance + amount : currentBalance - amount;
-        await addDoc(collection(db, "mobile_banking_logs"), {
+        await addDoc(collection(db, "mobileBanking"), {
           type: form.type,
           operator: form.operator,
           amount,
           commission,
-          balance_after: newBalance,
-          notes: form.notes,
-          created_at: Timestamp.now(),
+          currentBalance: newBalance,
+          note: form.note,
+          createdAt: Timestamp.now(),
         });
       }
       setShowForm(false);
       setEditingLog(null);
-      setForm({ type: "cash_in", operator: "bkash", amount: "", notes: "" });
+      setForm({ type: "cash_in", operator: "bkash", amount: "", note: "" });
       await loadLogs();
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
@@ -142,7 +141,7 @@ const MobileBanking: React.FC = () => {
       type: log.type,
       operator: log.operator,
       amount: String(log.amount),
-      notes: log.notes || "",
+      note: log.note || "",
     });
     setShowForm(true);
   };
@@ -150,7 +149,7 @@ const MobileBanking: React.FC = () => {
   const handleDelete = async (logId: string) => {
     if (!confirm("এই লেনদেনটি মুছে ফেলতে চান?")) return;
     try {
-      await deleteDoc(doc(db, "mobile_banking_logs", logId));
+      await deleteDoc(doc(db, "mobileBanking", logId));
       await loadLogs();
     } catch (e) { console.error(e); }
   };
@@ -159,7 +158,7 @@ const MobileBanking: React.FC = () => {
   today.setHours(0, 0, 0, 0);
   let todayCashIn = 0, todayCashOut = 0, todayRecharge = 0, todayCommission = 0;
   logs.forEach((l) => {
-    const d = l.created_at?.toDate?.();
+    const d = l.createdAt?.toDate?.();
     if (d && d >= today) {
       if (l.type === "cash_in") todayCashIn += l.amount;
       else if (l.type === "cash_out") todayCashOut += l.amount;
@@ -184,9 +183,9 @@ const MobileBanking: React.FC = () => {
     content += `আজ কমিশন: ৳${todayCommission.toLocaleString("bn-BD")}\n\n`;
     content += `লেনদেন ইতিহাস:\n${"-".repeat(40)}\n`;
     logs.forEach((l) => {
-      const date = l.created_at?.toDate?.();
-      const typeLabel = l.type === "cash_in" ? "ক্যাশ ইন" : l.type === "cash_out" ? "ক্যাশ আউট" : "রিচার্জ";
-      content += `${date ? date.toLocaleDateString("bn-BD") : ""} | ${l.operator} | ${typeLabel} | ৳${l.amount.toLocaleString("bn-BD")} | কমিশন: ৳${(l.commission || 0).toLocaleString("bn-BD")}${l.notes ? ` | ${l.notes}` : ""}\n`;
+      const date = l.createdAt?.toDate?.();
+      const typeLabel2 = l.type === "cash_in" ? "ক্যাশ ইন" : l.type === "cash_out" ? "ক্যাশ আউট" : "রিচার্জ";
+      content += `${date ? date.toLocaleDateString("bn-BD") : ""} | ${l.operator} | ${typeLabel2} | ৳${l.amount.toLocaleString("bn-BD")} | কমিশন: ৳${(l.commission || 0).toLocaleString("bn-BD")}${l.note ? ` | ${l.note}` : ""}\n`;
     });
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -200,7 +199,6 @@ const MobileBanking: React.FC = () => {
   const typeLabel = (t: string) => t === "cash_in" ? "ক্যাশ ইন" : t === "cash_out" ? "ক্যাশ আউট" : "রিচার্জ";
   const opLabel = (op: string) => DEFAULT_OPERATORS.find(o => o.value === op)?.label || op;
 
-  // Commission Settings Modal
   if (showSettings) {
     return (
       <div className="animate-fade-in">
@@ -264,13 +262,11 @@ const MobileBanking: React.FC = () => {
       </div>
 
       <div className="px-4 py-4 space-y-3">
-        {/* Balance */}
         <div className="bg-primary rounded-xl p-5 text-center">
           <p className="text-primary-foreground/70 text-base">বর্তমান ব্যালেন্স</p>
           <p className="text-4xl font-bold text-primary-foreground">৳{currentBalance.toLocaleString("bn-BD")}</p>
         </div>
 
-        {/* Today summary */}
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-card rounded-xl p-4 border border-border text-center shadow-sm">
             <ArrowDownLeft className="w-5 h-5 text-success mx-auto mb-1" />
@@ -294,16 +290,13 @@ const MobileBanking: React.FC = () => {
           </div>
         </div>
 
-        {/* New Transaction Button */}
-        <button onClick={() => { setEditingLog(null); setForm({ type: "cash_in", operator: "bkash", amount: "", notes: "" }); setShowForm(!showForm); }}
+        <button onClick={() => { setEditingLog(null); setForm({ type: "cash_in", operator: "bkash", amount: "", note: "" }); setShowForm(!showForm); }}
           className="w-full h-14 rounded-xl bg-primary text-primary-foreground text-lg font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-md">
           <Plus className="w-5 h-5" />নতুন লেনদেন
         </button>
 
-        {/* Form */}
         {showForm && (
           <div className="bg-card rounded-xl p-4 border border-border space-y-3 animate-slide-up shadow-sm">
-            {/* Type */}
             <div className="flex gap-2">
               {(["cash_in", "cash_out", "recharge"] as const).map((t) => (
                 <button key={t} onClick={() => setForm({ ...form, type: t })}
@@ -315,7 +308,6 @@ const MobileBanking: React.FC = () => {
               ))}
             </div>
 
-            {/* Operator */}
             <div>
               <label className="text-sm font-semibold text-foreground mb-1.5 block">অপারেটর</label>
               <div className="grid grid-cols-3 gap-2">
@@ -330,12 +322,10 @@ const MobileBanking: React.FC = () => {
               </div>
             </div>
 
-            {/* Amount */}
             <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
               className="w-full h-12 px-3 rounded-xl border border-input bg-background text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder="টাকার পরিমাণ" />
 
-            {/* Commission display */}
             {amountNum > 0 && (
               <div className="bg-secondary/10 rounded-xl p-3 text-center">
                 <p className="text-sm text-muted-foreground">কমিশন (লাভ)</p>
@@ -343,8 +333,7 @@ const MobileBanking: React.FC = () => {
               </div>
             )}
 
-            {/* Note */}
-            <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })}
               className="w-full h-12 px-3 rounded-xl border border-input bg-background text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder="কাস্টমার নম্বর / নোট (ঐচ্ছিক)" />
 
@@ -355,7 +344,7 @@ const MobileBanking: React.FC = () => {
             </button>
 
             {editingLog && (
-              <button onClick={() => { setEditingLog(null); setShowForm(false); setForm({ type: "cash_in", operator: "bkash", amount: "", notes: "" }); }}
+              <button onClick={() => { setEditingLog(null); setShowForm(false); setForm({ type: "cash_in", operator: "bkash", amount: "", note: "" }); }}
                 className="w-full h-12 rounded-xl border border-border text-foreground text-base font-medium">
                 বাতিল
               </button>
@@ -363,7 +352,6 @@ const MobileBanking: React.FC = () => {
           </div>
         )}
 
-        {/* Transaction History */}
         <div className="space-y-2 mt-4">
           <h3 className="text-base font-bold text-foreground flex items-center gap-2">
             <RefreshCw className="w-4 h-4 text-primary" /> লেনদেন ইতিহাস
@@ -374,7 +362,7 @@ const MobileBanking: React.FC = () => {
               <p className="text-muted-foreground text-base">কোনো লেনদেন নেই</p>
             </div>
           ) : displayedLogs.map((l) => {
-            const date = l.created_at?.toDate?.();
+            const date = l.createdAt?.toDate?.();
             return (
               <div key={l.id} className="bg-card rounded-xl p-4 border border-border shadow-sm">
                 <div className="flex justify-between items-center">
@@ -394,7 +382,7 @@ const MobileBanking: React.FC = () => {
                     )}
                     <div>
                       <p className="text-base font-semibold text-foreground">{typeLabel(l.type)}</p>
-                      <p className="text-sm text-muted-foreground">{opLabel(l.operator)} {date ? `· ${date.toLocaleDateString("bn-BD")}` : ""} {l.notes && `· ${l.notes}`}</p>
+                      <p className="text-sm text-muted-foreground">{opLabel(l.operator)} {date ? `· ${date.toLocaleDateString("bn-BD")}` : ""} {l.note && `· ${l.note}`}</p>
                     </div>
                   </div>
                   <div className="text-right">

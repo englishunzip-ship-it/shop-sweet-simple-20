@@ -1,15 +1,15 @@
 import React, { useEffect, useState, useRef } from "react";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, Timestamp, query, where, orderBy } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, Timestamp } from "firebase/firestore";
 import { Plus, Search, Edit2, Trash2, Phone, ArrowLeft, Save, Users as UsersIcon, Banknote, ChevronDown, ChevronUp, Download, Upload, CheckCircle, UserPlus, FileEdit, Coins } from "lucide-react";
 
 interface Customer {
   id: string;
   name: string;
   phone: string;
-  address: string;
-  total_due: number;
-  notes: string;
+  location: string;
+  totalDue: number;
+  note: string;
 }
 
 const Customers: React.FC = () => {
@@ -18,7 +18,7 @@ const Customers: React.FC = () => {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
-  const [form, setForm] = useState({ name: "", phone: "", address: "", notes: "" });
+  const [form, setForm] = useState({ name: "", phone: "", location: "", note: "" });
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
@@ -26,7 +26,6 @@ const Customers: React.FC = () => {
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("cash");
   const [savingPayment, setSavingPayment] = useState(false);
 
   useEffect(() => { loadCustomers(); }, []);
@@ -42,8 +41,8 @@ const Customers: React.FC = () => {
     finally { setLoading(false); }
   };
 
-  const openAdd = () => { setEditing(null); setForm({ name: "", phone: "", address: "", notes: "" }); setShowForm(true); };
-  const openEdit = (c: Customer) => { setEditing(c); setForm({ name: c.name, phone: c.phone, address: c.address, notes: c.notes || "" }); setShowForm(true); };
+  const openAdd = () => { setEditing(null); setForm({ name: "", phone: "", location: "", note: "" }); setShowForm(true); };
+  const openEdit = (c: Customer) => { setEditing(c); setForm({ name: c.name, phone: c.phone, location: c.location || "", note: c.note || "" }); setShowForm(true); };
 
   const handleSave = async () => {
     if (!form.name) return;
@@ -52,7 +51,7 @@ const Customers: React.FC = () => {
       if (editing) {
         await updateDoc(doc(db, "customers", editing.id), { ...form });
       } else {
-        await addDoc(collection(db, "customers"), { ...form, total_due: 0, created_at: Timestamp.now() });
+        await addDoc(collection(db, "customers"), { ...form, totalDue: 0, createdAt: Timestamp.now() });
       }
       setShowForm(false);
       await loadCustomers();
@@ -90,8 +89,8 @@ const Customers: React.FC = () => {
       for (const item of data) {
         if (!item.name) continue;
         await addDoc(collection(db, "customers"), {
-          name: item.name || "", phone: item.phone || "", address: item.address || "",
-          notes: item.notes || "", total_due: Number(item.total_due) || 0, created_at: Timestamp.now(),
+          name: item.name || "", phone: item.phone || "", location: item.location || "",
+          note: item.note || "", totalDue: Number(item.totalDue) || 0, createdAt: Timestamp.now(),
         });
         count++;
       }
@@ -117,13 +116,10 @@ const Customers: React.FC = () => {
     if (amount <= 0) return;
     setSavingPayment(true);
     try {
-      await addDoc(collection(db, "payments"), {
-        customer_id: selectedCustomer.id, sale_id: null, amount, payment_method: paymentMethod, created_at: Timestamp.now(),
-      });
-      const newDue = Math.max(0, (selectedCustomer.total_due || 0) - amount);
-      await updateDoc(doc(db, "customers", selectedCustomer.id), { total_due: newDue });
+      const newDue = Math.max(0, (selectedCustomer.totalDue || 0) - amount);
+      await updateDoc(doc(db, "customers", selectedCustomer.id), { totalDue: newDue });
       setPaymentAmount("");
-      setSelectedCustomer({ ...selectedCustomer, total_due: newDue });
+      setSelectedCustomer({ ...selectedCustomer, totalDue: newDue });
       await loadCustomers();
     } catch (e) { console.error(e); }
     finally { setSavingPayment(false); }
@@ -132,7 +128,7 @@ const Customers: React.FC = () => {
   const filtered = customers.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search)
   );
-  const totalDues = customers.reduce((s, c) => s + (c.total_due || 0), 0);
+  const totalDues = customers.reduce((s, c) => s + (c.totalDue || 0), 0);
 
   if (showForm) {
     return (
@@ -147,8 +143,8 @@ const Customers: React.FC = () => {
           {[
             { label: "নাম *", key: "name", placeholder: "কাস্টমারের নাম" },
             { label: "ফোন", key: "phone", placeholder: "01XXXXXXXXX", type: "tel" },
-            { label: "ঠিকানা", key: "address", placeholder: "ঠিকানা লিখুন" },
-            { label: "নোট", key: "notes", placeholder: "বিশেষ নোট" },
+            { label: "ঠিকানা", key: "location", placeholder: "ঠিকানা লিখুন" },
+            { label: "নোট", key: "note", placeholder: "বিশেষ নোট" },
           ].map((f) => (
             <div key={f.key}>
               <label className="text-base font-semibold text-foreground mb-1 block">{f.label}</label>
@@ -230,7 +226,7 @@ const Customers: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <h4 className="text-base font-bold text-foreground truncate">{c.name}</h4>
                     <p className="text-sm text-muted-foreground">{c.phone || "ফোন নেই"}</p>
-                    {c.address && <p className="text-sm text-muted-foreground">{c.address}</p>}
+                    {c.location && <p className="text-sm text-muted-foreground">{c.location}</p>}
                   </div>
                   <div className="flex items-center gap-1">
                     {c.phone && (
@@ -247,20 +243,20 @@ const Customers: React.FC = () => {
                   </div>
                 </div>
 
-                {(c.total_due > 0 || selectedCustomer?.id === c.id) && (
+                {(c.totalDue > 0 || selectedCustomer?.id === c.id) && (
                   <div className="mt-3 pt-3 border-t border-border">
                     <button onClick={() => openDueManagement(c)} className="w-full flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Banknote className="w-5 h-5 text-destructive" />
                         <span className="text-base font-semibold text-destructive">
-                          বকেয়া: ৳{(selectedCustomer?.id === c.id ? selectedCustomer.total_due : c.total_due).toLocaleString("bn-BD")}
+                          বকেয়া: ৳{(selectedCustomer?.id === c.id ? selectedCustomer.totalDue : c.totalDue).toLocaleString("bn-BD")}
                         </span>
                       </div>
                       {selectedCustomer?.id === c.id ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
                     </button>
                   </div>
                 )}
-                {c.total_due === 0 && selectedCustomer?.id !== c.id && (
+                {c.totalDue === 0 && selectedCustomer?.id !== c.id && (
                   <div className="mt-2 flex items-center gap-1">
                     <CheckCircle className="w-4 h-4 text-success" />
                     <span className="text-sm text-success font-medium">কোনো বকেয়া নেই</span>
@@ -270,7 +266,7 @@ const Customers: React.FC = () => {
 
               {selectedCustomer?.id === c.id && (
                 <div className="bg-muted/50 p-4 space-y-3 border-t border-border animate-fade-in">
-                  {selectedCustomer.total_due > 0 && (
+                  {selectedCustomer.totalDue > 0 && (
                     <div className="bg-card rounded-xl p-3 space-y-2 border border-border">
                       <h5 className="text-base font-semibold text-foreground flex items-center gap-2">
                         <Coins className="w-4 h-4 text-primary" /> বকেয়া আদায়
@@ -278,16 +274,6 @@ const Customers: React.FC = () => {
                       <input type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)}
                         className="w-full h-12 px-3 rounded-xl border border-input bg-background text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         placeholder="টাকার পরিমাণ" />
-                      <div className="flex gap-2">
-                        {[{ v: "cash", l: "নগদ", icon: Banknote }, { v: "mobile_banking", l: "মোবাইল", icon: Phone }].map((m) => (
-                          <button key={m.v} onClick={() => setPaymentMethod(m.v)}
-                            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors flex items-center justify-center gap-1.5 ${
-                              paymentMethod === m.v ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"
-                            }`}>
-                            <m.icon className="w-4 h-4" /> {m.l}
-                          </button>
-                        ))}
-                      </div>
                       <button onClick={handleCollectPayment} disabled={savingPayment || !paymentAmount}
                         className="w-full h-12 rounded-xl bg-success text-success-foreground text-base font-bold disabled:opacity-50 active:scale-[0.98] transition-transform">
                         {savingPayment ? "সেভ হচ্ছে..." : "পেমেন্ট সেভ করুন"}
