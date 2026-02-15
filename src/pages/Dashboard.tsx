@@ -31,19 +31,19 @@ const Dashboard: React.FC = () => {
       today.setHours(0, 0, 0, 0);
       const todayTs = Timestamp.fromDate(today);
 
-      const salesQ = query(collection(db, "sales"), where("created_at", ">=", todayTs), orderBy("created_at", "desc"));
+      const salesQ = query(collection(db, "sales"), where("createdAt", ">=", todayTs), orderBy("createdAt", "desc"));
       const salesSnap = await getDocs(salesQ);
       let salesTotal = 0, profitTotal = 0;
       salesSnap.forEach((doc) => {
         const d = doc.data();
-        salesTotal += d.total_amount || 0;
+        salesTotal += d.totalAmount || 0;
         profitTotal += d.profit || 0;
       });
       setTodaySales(salesTotal);
       setTodayCount(salesSnap.size);
       setTodayProfit(profitTotal);
 
-      const mbQ = query(collection(db, "mobile_banking_logs"), where("created_at", ">=", todayTs));
+      const mbQ = query(collection(db, "mobileBanking"), where("createdAt", ">=", todayTs));
       const mbSnap = await getDocs(mbQ);
       let mbComm = 0;
       mbSnap.forEach((doc) => { mbComm += doc.data().commission || 0; });
@@ -54,19 +54,19 @@ const Dashboard: React.FC = () => {
       const dueList: any[] = [];
       custSnap.forEach((doc) => {
         const d = doc.data();
-        dues += d.total_due || 0;
-        if (d.total_due > 0) dueList.push({ id: doc.id, ...d });
+        dues += d.totalDue || 0;
+        if (d.totalDue > 0) dueList.push({ id: doc.id, ...d });
       });
       setTotalDue(dues);
       setTotalCustomers(custSnap.size);
-      dueList.sort((a, b) => b.total_due - a.total_due);
+      dueList.sort((a, b) => b.totalDue - a.totalDue);
       setDueCustomers(dueList);
 
       const prodSnap = await getDocs(collection(db, "products"));
       const lowStock: any[] = [];
       prodSnap.forEach((doc) => {
         const d = doc.data();
-        if (d.currentStock <= (d.lowStockLimit || 5)) lowStock.push({ id: doc.id, ...d });
+        if (d.currentStock <= (d.stockLimit || 5)) lowStock.push({ id: doc.id, ...d });
       });
       setTotalProducts(prodSnap.size);
       setLowStockItems(lowStock);
@@ -157,7 +157,7 @@ const Dashboard: React.FC = () => {
             <div className="space-y-2">
               {lowStockItems.slice(0, 5).map((item) => (
                 <div key={item.id} className="flex items-center justify-between py-2.5 border-b border-border last:border-0">
-                  <span className="text-base text-foreground font-medium">{item.product_name}</span>
+                  <span className="text-base text-foreground font-medium">{item.name}</span>
                   <span className="text-sm font-bold text-destructive bg-destructive/10 px-3 py-1 rounded-full">
                     {item.currentStock} {item.unit}
                   </span>
@@ -188,7 +188,7 @@ const Dashboard: React.FC = () => {
                     {c.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
                   </div>
                   <span className="text-sm font-bold text-destructive bg-destructive/10 px-3 py-1 rounded-full">
-                    ৳{c.total_due.toLocaleString("bn-BD")}
+                    ৳{c.totalDue.toLocaleString("bn-BD")}
                   </span>
                 </div>
               ))}
