@@ -4,9 +4,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/lib/firebase";
 import { collection, query, where, getDocs, orderBy, Timestamp } from "firebase/firestore";
 import {
-  ShoppingCart, Package, Users, AlertTriangle, TrendingUp,
-  Plus, LogOut, Smartphone, ArrowRight, Banknote, BarChart3, AlertCircle,
-  Store, Boxes, DollarSign, CreditCard, Zap
+  Package, Users, AlertTriangle, TrendingUp,
+  Plus, LogOut, Smartphone, ArrowRight, BarChart3, AlertCircle,
+  Store, Boxes, DollarSign, Wallet, CreditCard, Zap, Coins
 } from "lucide-react";
 
 const Dashboard: React.FC = () => {
@@ -18,7 +18,9 @@ const Dashboard: React.FC = () => {
   const [totalDue, setTotalDue] = useState(0);
   const [totalProducts, setTotalProducts] = useState(0);
   const [totalCustomers, setTotalCustomers] = useState(0);
+  const [mbCurrentBalance, setMbCurrentBalance] = useState(0);
   const [mbTodayCommission, setMbTodayCommission] = useState(0);
+  const [todayTotalIncome, setTodayTotalIncome] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<any[]>([]);
   const [dueCustomers, setDueCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +50,14 @@ const Dashboard: React.FC = () => {
       let mbComm = 0;
       mbSnap.forEach((doc) => { mbComm += doc.data().commission || 0; });
       setMbTodayCommission(mbComm);
+      setTodayTotalIncome(profitTotal + mbComm);
+
+      // MB current balance
+      const mbAllQ = query(collection(db, "mobile_banking_logs"), orderBy("created_at", "desc"));
+      const mbAllSnap = await getDocs(mbAllQ);
+      if (!mbAllSnap.empty) {
+        setMbCurrentBalance(mbAllSnap.docs[0].data().balance_after || 0);
+      }
 
       const custSnap = await getDocs(collection(db, "customers"));
       let dues = 0;
@@ -74,8 +84,6 @@ const Dashboard: React.FC = () => {
     finally { setLoading(false); }
   };
 
-  const totalProfitWithMB = todayProfit + mbTodayCommission;
-
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -86,44 +94,46 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="animate-fade-in pb-4">
+      {/* Top Bar */}
       <div className="bg-primary px-5 pt-6 pb-12 rounded-b-[2rem]">
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-primary-foreground/15 flex items-center justify-center">
               <Store className="w-6 h-6 text-primary-foreground" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-primary-foreground">জিসান ট্রেডার্স</h1>
-              <p className="text-primary-foreground/60 text-xs">ইনভেন্টরি ম্যানেজমেন্ট</p>
+              <p className="text-primary-foreground/60 text-xs">মো রকিবুল হাসান সেখ</p>
             </div>
           </div>
           <button onClick={logout} className="p-2.5 rounded-full bg-primary-foreground/10 text-primary-foreground active:scale-95 transition-transform">
             <LogOut className="w-5 h-5" />
           </button>
         </div>
+      </div>
 
-        <div className="grid grid-cols-3 gap-2">
+      <div className="px-4 -mt-8 space-y-4">
+        {/* Summary Cards Grid */}
+        <div className="grid grid-cols-2 gap-3">
           {[
-            { icon: TrendingUp, label: "আজকের বিক্রয়", value: `৳${todaySales.toLocaleString("bn-BD")}`, sub: `${todayCount.toLocaleString("bn-BD")} টি` },
-            { icon: DollarSign, label: "আজকের লাভ", value: `৳${totalProfitWithMB.toLocaleString("bn-BD")}`, sub: "বিক্রয় + কমিশন" },
-            { icon: Banknote, label: "মোট বকেয়া", value: `৳${totalDue.toLocaleString("bn-BD")}`, sub: `${dueCustomers.length.toLocaleString("bn-BD")} জন` },
-            { icon: Boxes, label: "মোট পণ্য", value: totalProducts.toLocaleString("bn-BD"), sub: `${lowStockItems.length} কম স্টক` },
-            { icon: Users, label: "মোট কাস্টমার", value: totalCustomers.toLocaleString("bn-BD"), sub: "" },
-            { icon: Smartphone, label: "মোবাইল ব্যাংকিং", value: `৳${mbTodayCommission.toLocaleString("bn-BD")}`, sub: "টোটাল কমিশন" },
+            { icon: TrendingUp, label: "আজকের বিক্রয়", value: `৳${todaySales.toLocaleString("bn-BD")}`, color: "text-primary" },
+            { icon: DollarSign, label: "আজকের লাভ", value: `৳${todayProfit.toLocaleString("bn-BD")}`, color: "text-success" },
+            { icon: CreditCard, label: "মোট বকেয়া", value: `৳${totalDue.toLocaleString("bn-BD")}`, color: "text-destructive" },
+            { icon: Boxes, label: "মোট পণ্য", value: totalProducts.toLocaleString("bn-BD"), color: "text-info" },
+            { icon: Users, label: "মোট কাস্টমার", value: totalCustomers.toLocaleString("bn-BD"), color: "text-secondary" },
+            { icon: Wallet, label: "MB ব্যালেন্স", value: `৳${mbCurrentBalance.toLocaleString("bn-BD")}`, color: "text-primary" },
+            { icon: Smartphone, label: "MB কমিশন (আজ)", value: `৳${mbTodayCommission.toLocaleString("bn-BD")}`, color: "text-secondary" },
+            { icon: Coins, label: "মোট আয় (আজ)", value: `৳${todayTotalIncome.toLocaleString("bn-BD")}`, color: "text-primary" },
           ].map((card, i) => (
-            <div key={i} className="bg-primary-foreground/12 backdrop-blur-sm rounded-2xl p-3 border border-primary-foreground/10">
-              <div className="w-7 h-7 rounded-lg bg-primary-foreground/15 flex items-center justify-center mb-1.5">
-                <card.icon className="w-4 h-4 text-primary-foreground" />
-              </div>
-              <p className="text-primary-foreground/70 text-[10px] font-medium leading-tight">{card.label}</p>
-              <p className="text-lg font-bold text-primary-foreground leading-tight mt-0.5">{card.value}</p>
-              {card.sub && <p className="text-primary-foreground/50 text-[10px] mt-0.5">{card.sub}</p>}
+            <div key={i} className="bg-card rounded-2xl p-4 border border-border shadow-sm text-center">
+              <card.icon className={`w-6 h-6 mx-auto mb-1 ${card.color}`} />
+              <p className="text-xs text-muted-foreground font-medium">{card.label}</p>
+              <p className={`text-lg font-bold ${card.color} mt-0.5`}>{card.value}</p>
             </div>
           ))}
         </div>
-      </div>
 
-      <div className="px-4 -mt-6 space-y-4">
+        {/* Quick Actions */}
         <div className="bg-card rounded-2xl p-5 shadow-md border border-border">
           <h3 className="text-base font-bold text-foreground mb-4 flex items-center gap-2">
             <Zap className="w-5 h-5 text-warning" /> দ্রুত অ্যাকশন
@@ -146,6 +156,7 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
+        {/* Low Stock Alert */}
         {lowStockItems.length > 0 && (
           <div className="bg-card rounded-2xl p-5 shadow-sm border border-destructive/20">
             <div className="flex items-center gap-2 mb-3">
@@ -172,6 +183,7 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
+        {/* Due Customers Alert */}
         {dueCustomers.length > 0 && (
           <div className="bg-card rounded-2xl p-5 shadow-sm border border-warning/20">
             <div className="flex items-center gap-2 mb-3">
@@ -201,6 +213,7 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
+        {/* Reports Link */}
         <button onClick={() => navigate("/reports")}
           className="w-full bg-card rounded-2xl p-4 shadow-sm border border-border flex items-center justify-between active:scale-[0.98] transition-transform">
           <div className="flex items-center gap-3">
