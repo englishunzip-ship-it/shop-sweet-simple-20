@@ -2,9 +2,9 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy, where, getDoc
+  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy, where
 } from "firebase/firestore";
-import { ArrowLeft, Plus, Minus, ShoppingCart, Check, Search, X, UserPlus, User, Trash2, Edit3, ChevronDown, Banknote, ClipboardList } from "lucide-react";
+import { ArrowLeft, Plus, ShoppingCart, Check, Search, X, UserPlus, User, Trash2, Edit3, ChevronDown, CheckSquare, Square } from "lucide-react";
 
 interface Product {
   id: string;
@@ -38,7 +38,6 @@ interface Sale {
   paid_amount: number;
   due_amount: number;
   profit: number;
-  payment_type: string;
   created_at: any;
 }
 
@@ -61,7 +60,6 @@ const Sales: React.FC = () => {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [discount, setDiscount] = useState("");
   const [paidAmount, setPaidAmount] = useState("");
-  const [paymentType, setPaymentType] = useState("cash");
   const [searchProduct, setSearchProduct] = useState("");
   const [searchCustomer, setSearchCustomer] = useState("");
   const [showProductPicker, setShowProductPicker] = useState(false);
@@ -77,6 +75,10 @@ const Sales: React.FC = () => {
 
   // Edit mode flag
   const [isEditMode, setIsEditMode] = useState(false);
+
+  // Multi-select delete
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedSaleIds, setSelectedSaleIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (isNew) { loadForNewSale(); } else { loadSales(); }
@@ -183,17 +185,14 @@ const Sales: React.FC = () => {
         paid_amount: paidNum,
         due_amount: dueAmount,
         profit,
-        payment_type: paymentType,
         created_at: Timestamp.now(),
       };
 
       if (isEditMode && editingSale) {
-        // Update existing sale
         await updateDoc(doc(db, "sales", editingSale.id), saleData);
         setIsEditMode(false);
         setEditingSale(null);
       } else {
-        // Create new sale
         const saleRef = await addDoc(collection(db, "sales"), saleData);
 
         for (const item of cart) {
@@ -219,7 +218,7 @@ const Sales: React.FC = () => {
         if (paidNum > 0) {
           await addDoc(collection(db, "payments"), {
             customer_id: selectedCustomer?.id || null, sale_id: saleRef.id,
-            amount: paidNum, payment_method: paymentType, created_at: Timestamp.now(),
+            amount: paidNum, created_at: Timestamp.now(),
           });
         }
       }
@@ -237,13 +236,39 @@ const Sales: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedSaleIds.size === 0) return;
+    if (!confirm(`${selectedSaleIds.size} টি বিক্রয় মুছে ফেলতে চান?`)) return;
+    try {
+      for (const id of selectedSaleIds) {
+        await deleteDoc(doc(db, "sales", id));
+      }
+      setSales(sales.filter(s => !selectedSaleIds.has(s.id)));
+      setSelectedSaleIds(new Set());
+      setSelectMode(false);
+    } catch (e) { console.error(e); }
+  };
+
+  const toggleSelectSale = (id: string) => {
+    const newSet = new Set(selectedSaleIds);
+    if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
+    setSelectedSaleIds(newSet);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedSaleIds.size === sales.length) {
+      setSelectedSaleIds(new Set());
+    } else {
+      setSelectedSaleIds(new Set(sales.map(s => s.id)));
+    }
+  };
+
   const handleEditSale = async (sale: Sale) => {
     setEditingSale(sale);
     setIsEditMode(true);
     setLoading(true);
 
     try {
-      // Load products and customers
       const [pSnap, cSnap] = await Promise.all([
         getDocs(collection(db, "products")),
         getDocs(collection(db, "customers")),
@@ -256,13 +281,11 @@ const Sales: React.FC = () => {
       cSnap.forEach((d) => cList.push({ id: d.id, ...d.data() } as Customer));
       setCustomers(cList.sort((a, b) => a.name.localeCompare(b.name)));
 
-      // Populate form from sale data
       if (sale.customer_id) {
         const cust = cList.find(c => c.id === sale.customer_id);
         if (cust) setSelectedCustomer(cust);
       }
 
-      // Reconstruct cart from sale items
       if (sale.items && sale.items.length > 0) {
         const cartItems: CartItem[] = sale.items.map((item: any) => {
           const product = pList.find(p => p.id === item.productId) || {
@@ -273,18 +296,13 @@ const Sales: React.FC = () => {
             currentStock: 0,
             unit: "",
           };
-          return {
-            product,
-            quantity: item.quantity,
-            price: item.salePrice,
-          };
+          return { product, quantity: item.quantity, price: item.salePrice };
         });
         setCart(cartItems);
       }
 
       setDiscount(String(sale.discount || ""));
       setPaidAmount(String(sale.paid_amount || ""));
-      setPaymentType(sale.payment_type || "cash");
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -401,7 +419,7 @@ const Sales: React.FC = () => {
               </div>
             )}
 
-            {/* Cart Items - quantity as input box only */}
+            {/* Cart Items */}
             {cart.length > 0 && (
               <div className="space-y-2">
                 {cart.map((item) => (
@@ -429,7 +447,7 @@ const Sales: React.FC = () => {
             )}
           </div>
 
-          {/* Discount & Paid */}
+          {/* Discount & Paid - NO payment method selector */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-base font-semibold text-foreground mb-1 block">ডিসকাউন্ট (৳)</label>
@@ -440,27 +458,6 @@ const Sales: React.FC = () => {
               <label className="text-base font-semibold text-foreground mb-1 block">প্রদান (৳)</label>
               <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)}
                 className="w-full h-12 px-3 rounded-xl border border-input bg-card text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring" placeholder="0" />
-            </div>
-          </div>
-
-          {/* Payment Type */}
-          <div>
-            <label className="text-base font-semibold text-foreground mb-2 block">পেমেন্ট পদ্ধতি</label>
-            <div className="flex gap-2">
-              {[
-                { value: "cash", label: "নগদ", icon: Banknote },
-                { value: "due", label: "বাকি", icon: ClipboardList },
-              ].map((pt) => (
-                <button key={pt.value} onClick={() => {
-                  setPaymentType(pt.value);
-                  if (pt.value === "due") setPaidAmount("0");
-                }}
-                  className={`flex-1 py-3 rounded-xl text-base font-semibold border transition-colors flex items-center justify-center gap-2 ${
-                    paymentType === pt.value ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"
-                  }`}>
-                  <pt.icon className="w-4 h-4" /> {pt.label}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -486,7 +483,7 @@ const Sales: React.FC = () => {
     );
   }
 
-  // SALES LIST with pagination
+  // SALES LIST with multi-select delete
   const displayedSales = sales.slice(0, displayedCount);
   const hasMore = displayedCount < sales.length;
 
@@ -495,10 +492,36 @@ const Sales: React.FC = () => {
       <div className="px-4 py-4 bg-card border-b border-border">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-foreground">বিক্রয়</h2>
-          <button onClick={() => navigate("/sales/new")}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-base font-semibold active:scale-95 transition-transform shadow-md">
-            <Plus className="w-5 h-5" />নতুন বিক্রয়
-          </button>
+          <div className="flex items-center gap-2">
+            {selectMode ? (
+              <>
+                <button onClick={toggleSelectAll}
+                  className="flex items-center gap-1 px-3 py-2 rounded-xl bg-muted text-foreground text-sm font-semibold">
+                  {selectedSaleIds.size === sales.length ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                  সব
+                </button>
+                <button onClick={handleBulkDelete} disabled={selectedSaleIds.size === 0}
+                  className="flex items-center gap-1 px-3 py-2 rounded-xl bg-destructive text-destructive-foreground text-sm font-semibold disabled:opacity-50">
+                  <Trash2 className="w-4 h-4" /> মুছুন ({selectedSaleIds.size})
+                </button>
+                <button onClick={() => { setSelectMode(false); setSelectedSaleIds(new Set()); }}
+                  className="p-2 rounded-xl text-muted-foreground"><X className="w-5 h-5" /></button>
+              </>
+            ) : (
+              <>
+                {sales.length > 0 && (
+                  <button onClick={() => setSelectMode(true)}
+                    className="flex items-center gap-1 px-3 py-2 rounded-xl bg-muted text-foreground text-sm font-semibold">
+                    <CheckSquare className="w-4 h-4" /> সিলেক্ট
+                  </button>
+                )}
+                <button onClick={() => navigate("/sales/new")}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-base font-semibold active:scale-95 transition-transform shadow-md">
+                  <Plus className="w-5 h-5" />নতুন বিক্রয়
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
       <div className="p-4 space-y-3">
@@ -516,11 +539,21 @@ const Sales: React.FC = () => {
               return (
                 <div key={s.id} className="bg-card rounded-xl p-4 border border-border shadow-sm">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-base font-bold text-foreground">{s.customer_name || "ক্যাশ"}</h4>
-                      <p className="text-sm text-muted-foreground flex items-center gap-1">
-                        {date ? date.toLocaleDateString("bn-BD") : ""} · {s.payment_type === "cash" ? <><Banknote className="w-3.5 h-3.5 inline" /> নগদ</> : <><ClipboardList className="w-3.5 h-3.5 inline" /> বাকি</>}
-                      </p>
+                    <div className="flex items-center gap-3">
+                      {selectMode && (
+                        <button onClick={() => toggleSelectSale(s.id)} className="p-0.5">
+                          {selectedSaleIds.has(s.id)
+                            ? <CheckSquare className="w-5 h-5 text-primary" />
+                            : <Square className="w-5 h-5 text-muted-foreground" />}
+                        </button>
+                      )}
+                      <div>
+                        <h4 className="text-base font-bold text-foreground">{s.customer_name || "ক্যাশ"}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {date ? date.toLocaleDateString("bn-BD") : ""}
+                          {s.due_amount > 0 ? " · বাকি" : " · নগদ"}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-right">
@@ -528,12 +561,16 @@ const Sales: React.FC = () => {
                         {s.due_amount > 0 && <p className="text-sm text-destructive font-semibold">বাকি: ৳{s.due_amount.toLocaleString("bn-BD")}</p>}
                         {(s.profit || 0) > 0 && <p className="text-xs text-success font-medium">লাভ: ৳{s.profit.toLocaleString("bn-BD")}</p>}
                       </div>
-                      <button onClick={() => handleEditSale(s)} className="p-2 rounded-lg hover:bg-primary/10">
-                        <Edit3 className="w-4 h-4 text-primary" />
-                      </button>
-                      <button onClick={() => handleDeleteSale(s.id)} className="p-2 rounded-lg hover:bg-destructive/10">
-                        <Trash2 className="w-4 h-4 text-destructive" />
-                      </button>
+                      {!selectMode && (
+                        <>
+                          <button onClick={() => handleEditSale(s)} className="p-2 rounded-lg hover:bg-primary/10">
+                            <Edit3 className="w-4 h-4 text-primary" />
+                          </button>
+                          <button onClick={() => handleDeleteSale(s.id)} className="p-2 rounded-lg hover:bg-destructive/10">
+                            <Trash2 className="w-4 h-4 text-destructive" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
