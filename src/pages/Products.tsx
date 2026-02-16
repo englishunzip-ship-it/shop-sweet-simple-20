@@ -6,11 +6,11 @@ import { Plus, Search, Edit2, Trash2, ArrowLeft, Package, Save, Download, Upload
 
 interface Product {
   id: string;
-  name: string;
-  wholesalePrice: number;
-  salePrice: number;
+  product_name: string;
+  buying_price: number;
+  selling_price: number;
   currentStock: number;
-  stockLimit: number;
+  lowStockLimit: number;
   unit: string;
 }
 
@@ -24,7 +24,7 @@ const Products: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [form, setForm] = useState({
-    name: "", wholesalePrice: "", salePrice: "", currentStock: "", stockLimit: "5", unit: "পিস",
+    product_name: "", buying_price: "", selling_price: "", currentStock: "", lowStockLimit: "5", unit: "পিস",
   });
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -38,7 +38,7 @@ const Products: React.FC = () => {
       const snap = await getDocs(collection(db, "products"));
       const list: Product[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Product));
-      list.sort((a, b) => a.name.localeCompare(b.name));
+      list.sort((a, b) => a.product_name.localeCompare(b.product_name));
       setProducts(list);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -46,32 +46,32 @@ const Products: React.FC = () => {
 
   const openAdd = () => {
     setEditingProduct(null);
-    setForm({ name: "", wholesalePrice: "", salePrice: "", currentStock: "", stockLimit: "5", unit: "পিস" });
+    setForm({ product_name: "", buying_price: "", selling_price: "", currentStock: "", lowStockLimit: "5", unit: "পিস" });
     setShowForm(true);
   };
 
   const openEdit = (p: Product) => {
     setEditingProduct(p);
     setForm({
-      name: p.name, wholesalePrice: String(p.wholesalePrice), salePrice: String(p.salePrice),
-      currentStock: String(p.currentStock), stockLimit: String(p.stockLimit), unit: p.unit,
+      product_name: p.product_name, buying_price: String(p.buying_price), selling_price: String(p.selling_price),
+      currentStock: String(p.currentStock), lowStockLimit: String(p.lowStockLimit), unit: p.unit,
     });
     setShowForm(true);
   };
 
   const handleSave = async () => {
-    if (!form.name || !form.salePrice) return;
+    if (!form.product_name || !form.selling_price) return;
     setSaving(true);
     try {
       const data = {
-        name: form.name, wholesalePrice: Number(form.wholesalePrice) || 0,
-        salePrice: Number(form.salePrice) || 0, currentStock: Number(form.currentStock) || 0,
-        stockLimit: Number(form.stockLimit) || 5, unit: form.unit,
+        product_name: form.product_name, buying_price: Number(form.buying_price) || 0,
+        selling_price: Number(form.selling_price) || 0, currentStock: Number(form.currentStock) || 0,
+        lowStockLimit: Number(form.lowStockLimit) || 5, unit: form.unit,
       };
       if (editingProduct) {
         await updateDoc(doc(db, "products", editingProduct.id), data);
       } else {
-        await addDoc(collection(db, "products"), { ...data, createdAt: Timestamp.now() });
+        await addDoc(collection(db, "products"), { ...data, created_at: Timestamp.now() });
       }
       setShowForm(false);
       await loadProducts();
@@ -107,15 +107,15 @@ const Products: React.FC = () => {
       if (!Array.isArray(data)) throw new Error("Invalid format");
       let count = 0;
       for (const item of data) {
-        if (!item.name) continue;
+        if (!item.product_name) continue;
         await addDoc(collection(db, "products"), {
-          name: item.name || "",
-          wholesalePrice: Number(item.wholesalePrice) || 0,
-          salePrice: Number(item.salePrice) || 0,
+          product_name: item.product_name || "",
+          buying_price: Number(item.buying_price) || 0,
+          selling_price: Number(item.selling_price) || 0,
           currentStock: Number(item.currentStock) || 0,
-          stockLimit: Number(item.stockLimit) || 5,
+          lowStockLimit: Number(item.lowStockLimit) || 5,
           unit: item.unit || "পিস",
-          createdAt: Timestamp.now(),
+          created_at: Timestamp.now(),
         });
         count++;
       }
@@ -129,7 +129,7 @@ const Products: React.FC = () => {
     }
   };
 
-  const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = products.filter((p) => p.product_name.toLowerCase().includes(search.toLowerCase()));
 
   if (showForm) {
     return (
@@ -143,19 +143,19 @@ const Products: React.FC = () => {
         <div className="p-4 space-y-3">
           <div>
             <label className="text-base font-semibold text-foreground mb-1 block">পণ্যের নাম *</label>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+            <input value={form.product_name} onChange={(e) => setForm({ ...form, product_name: e.target.value })}
               className="w-full h-12 px-3 rounded-xl border border-input bg-card text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder="পণ্যের নাম লিখুন" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-base font-semibold text-foreground mb-1 block">ক্রয় মূল্য (৳)</label>
-              <input type="number" value={form.wholesalePrice} onChange={(e) => setForm({ ...form, wholesalePrice: e.target.value })}
+              <input type="number" value={form.buying_price} onChange={(e) => setForm({ ...form, buying_price: e.target.value })}
                 className="w-full h-12 px-3 rounded-xl border border-input bg-card text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring" placeholder="0" />
             </div>
             <div>
               <label className="text-base font-semibold text-foreground mb-1 block">বিক্রয় মূল্য (৳) *</label>
-              <input type="number" value={form.salePrice} onChange={(e) => setForm({ ...form, salePrice: e.target.value })}
+              <input type="number" value={form.selling_price} onChange={(e) => setForm({ ...form, selling_price: e.target.value })}
                 className="w-full h-12 px-3 rounded-xl border border-input bg-card text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring" placeholder="0" />
             </div>
           </div>
@@ -167,7 +167,7 @@ const Products: React.FC = () => {
             </div>
             <div>
               <label className="text-base font-semibold text-foreground mb-1 block">স্টক লিমিট</label>
-              <input type="number" value={form.stockLimit} onChange={(e) => setForm({ ...form, stockLimit: e.target.value })}
+              <input type="number" value={form.lowStockLimit} onChange={(e) => setForm({ ...form, lowStockLimit: e.target.value })}
                 className="w-full h-12 px-3 rounded-xl border border-input bg-card text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring" placeholder="5" />
             </div>
           </div>
@@ -182,7 +182,7 @@ const Products: React.FC = () => {
               ))}
             </div>
           </div>
-          <button onClick={handleSave} disabled={saving || !form.name || !form.salePrice}
+          <button onClick={handleSave} disabled={saving || !form.product_name || !form.selling_price}
             className="w-full h-14 rounded-xl bg-primary text-primary-foreground text-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98] transition-transform mt-4">
             <Save className="w-5 h-5" />{saving ? "সেভ হচ্ছে..." : "সেভ করুন"}
           </button>
@@ -242,13 +242,13 @@ const Products: React.FC = () => {
           filtered.map((p) => (
             <div key={p.id} className="bg-card rounded-xl p-4 border border-border flex items-center gap-3">
               <div className="flex-1 min-w-0">
-                <h4 className="text-base font-bold text-foreground truncate">{p.name}</h4>
+                <h4 className="text-base font-bold text-foreground truncate">{p.product_name}</h4>
                 <div className="flex items-center gap-3 mt-1">
-                  <span className="text-sm text-muted-foreground">ক্রয়: ৳{p.wholesalePrice}</span>
-                  <span className="text-sm text-foreground font-medium">বিক্রয়: ৳{p.salePrice}</span>
+                  <span className="text-sm text-muted-foreground">ক্রয়: ৳{p.buying_price}</span>
+                  <span className="text-sm text-foreground font-medium">বিক্রয়: ৳{p.selling_price}</span>
                 </div>
                 <div className="mt-1">
-                  <span className={`text-sm font-semibold px-2 py-0.5 rounded-lg ${p.currentStock <= p.stockLimit ? "text-destructive bg-destructive/10" : "text-success bg-success/10"}`}>
+                  <span className={`text-sm font-semibold px-2 py-0.5 rounded-lg ${p.currentStock <= p.lowStockLimit ? "text-destructive bg-destructive/10" : "text-success bg-success/10"}`}>
                     স্টক: {p.currentStock} {p.unit}
                   </span>
                 </div>

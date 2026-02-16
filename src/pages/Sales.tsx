@@ -2,15 +2,15 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy, where
+  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, Timestamp, query, orderBy, where, getDoc
 } from "firebase/firestore";
-import { ArrowLeft, Plus, ShoppingCart, Check, Search, X, UserPlus, User, Trash2, Edit3, ChevronDown } from "lucide-react";
+import { ArrowLeft, Plus, Minus, ShoppingCart, Check, Search, X, UserPlus, User, Trash2, Edit3, ChevronDown, Banknote, ClipboardList } from "lucide-react";
 
 interface Product {
   id: string;
-  name: string;
-  wholesalePrice: number;
-  salePrice: number;
+  product_name: string;
+  buying_price: number;
+  selling_price: number;
   currentStock: number;
   unit: string;
 }
@@ -30,15 +30,16 @@ interface CartItem {
 
 interface Sale {
   id: string;
-  customerId?: string;
-  customerName?: string;
+  customer_id?: string;
+  customer_name?: string;
   items?: any[];
-  totalAmount: number;
+  total_amount: number;
   discount: number;
-  paidAmount: number;
-  dueAmount: number;
+  paid_amount: number;
+  due_amount: number;
   profit: number;
-  createdAt: any;
+  payment_type: string;
+  created_at: any;
 }
 
 const PAGE_SIZE = 10;
@@ -52,6 +53,7 @@ const Sales: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [displayedCount, setDisplayedCount] = useState(PAGE_SIZE);
 
+  // New/Edit sale state
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -59,18 +61,21 @@ const Sales: React.FC = () => {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [discount, setDiscount] = useState("");
   const [paidAmount, setPaidAmount] = useState("");
+  const [paymentType, setPaymentType] = useState("cash");
   const [searchProduct, setSearchProduct] = useState("");
   const [searchCustomer, setSearchCustomer] = useState("");
   const [showProductPicker, setShowProductPicker] = useState(false);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // New customer inline form
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
   const [newCustName, setNewCustName] = useState("");
   const [newCustPhone, setNewCustPhone] = useState("");
-  const [newCustLocation, setNewCustLocation] = useState("");
+  const [newCustAddress, setNewCustAddress] = useState("");
   const [savingCustomer, setSavingCustomer] = useState(false);
 
+  // Edit mode flag
   const [isEditMode, setIsEditMode] = useState(false);
 
   useEffect(() => {
@@ -79,7 +84,7 @@ const Sales: React.FC = () => {
 
   const loadSales = async () => {
     try {
-      const q = query(collection(db, "sales"), orderBy("createdAt", "desc"));
+      const q = query(collection(db, "sales"), orderBy("created_at", "desc"));
       const snap = await getDocs(q);
       const list: Sale[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Sale));
@@ -96,7 +101,7 @@ const Sales: React.FC = () => {
       ]);
       const pList: Product[] = [];
       pSnap.forEach((d) => pList.push({ id: d.id, ...d.data() } as Product));
-      setProducts(pList.sort((a, b) => a.name.localeCompare(b.name)));
+      setProducts(pList.sort((a, b) => a.product_name.localeCompare(b.product_name)));
 
       const cList: Customer[] = [];
       cSnap.forEach((d) => cList.push({ id: d.id, ...d.data() } as Customer));
@@ -111,14 +116,14 @@ const Sales: React.FC = () => {
   const paidNum = Number(paidAmount) || 0;
   const dueAmount = Math.max(0, total - paidNum);
   const extraPayment = Math.max(0, paidNum - total);
-  const profit = cart.reduce((s, i) => s + (i.price - (i.product.wholesalePrice || 0)) * i.quantity, 0) - discountNum + extraPayment;
+  const profit = cart.reduce((s, i) => s + (i.price - (i.product.buying_price || 0)) * i.quantity, 0) - discountNum + extraPayment;
 
   const addToCart = (p: Product) => {
     const existing = cart.find((c) => c.product.id === p.id);
     if (existing) {
       setCart(cart.map((c) => c.product.id === p.id ? { ...c, quantity: c.quantity + 1 } : c));
     } else {
-      setCart([...cart, { product: p, quantity: 1, price: p.salePrice }]);
+      setCart([...cart, { product: p, quantity: 1, price: p.selling_price }]);
     }
     setShowProductPicker(false);
     setSearchProduct("");
@@ -144,15 +149,15 @@ const Sales: React.FC = () => {
     setSavingCustomer(true);
     try {
       const custRef = await addDoc(collection(db, "customers"), {
-        name: newCustName, phone: newCustPhone, location: newCustLocation,
-        note: "", totalDue: 0, createdAt: Timestamp.now(),
+        name: newCustName, phone: newCustPhone, address: newCustAddress,
+        notes: "", total_due: 0, created_at: Timestamp.now(),
       });
       const newCust: Customer = { id: custRef.id, name: newCustName, phone: newCustPhone };
       setCustomers([...customers, newCust].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedCustomer(newCust);
       setShowNewCustomerForm(false);
       setShowCustomerPicker(false);
-      setNewCustName(""); setNewCustPhone(""); setNewCustLocation("");
+      setNewCustName(""); setNewCustPhone(""); setNewCustAddress("");
     } catch (e) { console.error(e); }
     finally { setSavingCustomer(false); }
   };
@@ -163,46 +168,59 @@ const Sales: React.FC = () => {
     try {
       const items = cart.map(i => ({
         productId: i.product.id,
-        productName: i.product.name,
+        productName: i.product.product_name,
         quantity: i.quantity,
         salePrice: i.price,
-        wholesalePrice: i.product.wholesalePrice || 0,
+        wholesalePrice: i.product.buying_price || 0,
       }));
 
       const saleData = {
-        customerId: selectedCustomer?.id || null,
-        customerName: selectedCustomer?.name || "ক্যাশ বিক্রয়",
+        customer_id: selectedCustomer?.id || null,
+        customer_name: selectedCustomer?.name || "ক্যাশ বিক্রয়",
         items,
-        totalAmount: total,
+        total_amount: total,
         discount: discountNum,
-        paidAmount: paidNum,
-        dueAmount,
+        paid_amount: paidNum,
+        due_amount: dueAmount,
         profit,
-        createdAt: Timestamp.now(),
+        payment_type: paymentType,
+        created_at: Timestamp.now(),
       };
 
       if (isEditMode && editingSale) {
+        // Update existing sale
         await updateDoc(doc(db, "sales", editingSale.id), saleData);
         setIsEditMode(false);
         setEditingSale(null);
       } else {
-        await addDoc(collection(db, "sales"), saleData);
+        // Create new sale
+        const saleRef = await addDoc(collection(db, "sales"), saleData);
 
-        // Update stock
         for (const item of cart) {
+          await addDoc(collection(db, "sale_items"), {
+            sale_id: saleRef.id, product_id: item.product.id,
+            product_name: item.product.product_name, quantity: item.quantity,
+            price: item.price, created_at: Timestamp.now(),
+          });
           const newStock = Math.max(0, item.product.currentStock - item.quantity);
           await updateDoc(doc(db, "products", item.product.id), { currentStock: newStock });
         }
 
-        // Update customer due
         if (selectedCustomer && dueAmount > 0) {
-          const custSnap = await getDocs(query(collection(db, "customers"), where("__name__", "==", selectedCustomer.id)));
-          if (!custSnap.empty) {
-            const custData = custSnap.docs[0].data();
+          const custDoc = await getDocs(query(collection(db, "customers"), where("__name__", "==", selectedCustomer.id)));
+          if (!custDoc.empty) {
+            const custData = custDoc.docs[0].data();
             await updateDoc(doc(db, "customers", selectedCustomer.id), {
-              totalDue: (custData.totalDue || 0) + dueAmount,
+              total_due: (custData.total_due || 0) + dueAmount,
             });
           }
+        }
+
+        if (paidNum > 0) {
+          await addDoc(collection(db, "payments"), {
+            customer_id: selectedCustomer?.id || null, sale_id: saleRef.id,
+            amount: paidNum, payment_method: paymentType, created_at: Timestamp.now(),
+          });
         }
       }
 
@@ -225,40 +243,48 @@ const Sales: React.FC = () => {
     setLoading(true);
 
     try {
+      // Load products and customers
       const [pSnap, cSnap] = await Promise.all([
         getDocs(collection(db, "products")),
         getDocs(collection(db, "customers")),
       ]);
       const pList: Product[] = [];
       pSnap.forEach((d) => pList.push({ id: d.id, ...d.data() } as Product));
-      setProducts(pList.sort((a, b) => a.name.localeCompare(b.name)));
+      setProducts(pList.sort((a, b) => a.product_name.localeCompare(b.product_name)));
 
       const cList: Customer[] = [];
       cSnap.forEach((d) => cList.push({ id: d.id, ...d.data() } as Customer));
       setCustomers(cList.sort((a, b) => a.name.localeCompare(b.name)));
 
-      if (sale.customerId) {
-        const cust = cList.find(c => c.id === sale.customerId);
+      // Populate form from sale data
+      if (sale.customer_id) {
+        const cust = cList.find(c => c.id === sale.customer_id);
         if (cust) setSelectedCustomer(cust);
       }
 
+      // Reconstruct cart from sale items
       if (sale.items && sale.items.length > 0) {
         const cartItems: CartItem[] = sale.items.map((item: any) => {
           const product = pList.find(p => p.id === item.productId) || {
             id: item.productId,
-            name: item.productName,
-            wholesalePrice: item.wholesalePrice || 0,
-            salePrice: item.salePrice,
+            product_name: item.productName,
+            buying_price: item.wholesalePrice || 0,
+            selling_price: item.salePrice,
             currentStock: 0,
             unit: "",
           };
-          return { product, quantity: item.quantity, price: item.salePrice };
+          return {
+            product,
+            quantity: item.quantity,
+            price: item.salePrice,
+          };
         });
         setCart(cartItems);
       }
 
       setDiscount(String(sale.discount || ""));
-      setPaidAmount(String(sale.paidAmount || ""));
+      setPaidAmount(String(sale.paid_amount || ""));
+      setPaymentType(sale.payment_type || "cash");
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -266,7 +292,7 @@ const Sales: React.FC = () => {
   // NEW/EDIT SALE FORM
   if (isNew || isEditMode) {
     const filteredProducts = products.filter((p) =>
-      p.name.toLowerCase().includes(searchProduct.toLowerCase())
+      p.product_name.toLowerCase().includes(searchProduct.toLowerCase())
     );
     const filteredCustomers = customers.filter((c) =>
       c.name.toLowerCase().includes(searchCustomer.toLowerCase()) || c.phone.includes(searchCustomer)
@@ -329,7 +355,7 @@ const Sales: React.FC = () => {
                     <input value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} type="tel"
                       className="w-full h-12 px-3 rounded-xl border border-input bg-background text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       placeholder="ফোন নম্বর" />
-                    <input value={newCustLocation} onChange={(e) => setNewCustLocation(e.target.value)}
+                    <input value={newCustAddress} onChange={(e) => setNewCustAddress(e.target.value)}
                       className="w-full h-12 px-3 rounded-xl border border-input bg-background text-base text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       placeholder="ঠিকানা" />
                     <div className="flex gap-2">
@@ -367,21 +393,21 @@ const Sales: React.FC = () => {
                   {filteredProducts.map((p) => (
                     <button key={p.id} onClick={() => addToCart(p)}
                       className="w-full text-left px-4 py-3 text-base border-t border-border hover:bg-muted flex justify-between">
-                      <span className="text-foreground font-medium">{p.name}</span>
-                      <span className="text-muted-foreground text-sm">৳{p.salePrice} | {p.currentStock} {p.unit}</span>
+                      <span className="text-foreground font-medium">{p.product_name}</span>
+                      <span className="text-muted-foreground text-sm">৳{p.selling_price} | {p.currentStock} {p.unit}</span>
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Cart Items */}
+            {/* Cart Items - quantity as input box only */}
             {cart.length > 0 && (
               <div className="space-y-2">
                 {cart.map((item) => (
                   <div key={item.product.id} className="bg-secondary/10 rounded-xl p-4 border border-border shadow-sm">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-base font-semibold text-foreground">{item.product.name}</span>
+                      <span className="text-base font-semibold text-foreground">{item.product.product_name}</span>
                       <button onClick={() => removeFromCart(item.product.id)}>
                         <X className="w-5 h-5 text-destructive" />
                       </button>
@@ -417,6 +443,27 @@ const Sales: React.FC = () => {
             </div>
           </div>
 
+          {/* Payment Type */}
+          <div>
+            <label className="text-base font-semibold text-foreground mb-2 block">পেমেন্ট পদ্ধতি</label>
+            <div className="flex gap-2">
+              {[
+                { value: "cash", label: "নগদ", icon: Banknote },
+                { value: "due", label: "বাকি", icon: ClipboardList },
+              ].map((pt) => (
+                <button key={pt.value} onClick={() => {
+                  setPaymentType(pt.value);
+                  if (pt.value === "due") setPaidAmount("0");
+                }}
+                  className={`flex-1 py-3 rounded-xl text-base font-semibold border transition-colors flex items-center justify-center gap-2 ${
+                    paymentType === pt.value ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"
+                  }`}>
+                  <pt.icon className="w-4 h-4" /> {pt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Summary */}
           {cart.length > 0 && (
             <div className="bg-card rounded-xl p-4 border-2 border-primary/20 space-y-2 shadow-sm">
@@ -439,7 +486,7 @@ const Sales: React.FC = () => {
     );
   }
 
-  // SALES LIST
+  // SALES LIST with pagination
   const displayedSales = sales.slice(0, displayedCount);
   const hasMore = displayedCount < sales.length;
 
@@ -465,20 +512,20 @@ const Sales: React.FC = () => {
         ) : (
           <>
             {displayedSales.map((s) => {
-              const date = s.createdAt?.toDate?.();
+              const date = s.created_at?.toDate?.();
               return (
                 <div key={s.id} className="bg-card rounded-xl p-4 border border-border shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="text-base font-bold text-foreground">{s.customerName || "ক্যাশ"}</h4>
-                      <p className="text-sm text-muted-foreground">
-                        {date ? date.toLocaleDateString("bn-BD") : ""}
+                      <h4 className="text-base font-bold text-foreground">{s.customer_name || "ক্যাশ"}</h4>
+                      <p className="text-sm text-muted-foreground flex items-center gap-1">
+                        {date ? date.toLocaleDateString("bn-BD") : ""} · {s.payment_type === "cash" ? <><Banknote className="w-3.5 h-3.5 inline" /> নগদ</> : <><ClipboardList className="w-3.5 h-3.5 inline" /> বাকি</>}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-right">
-                        <p className="text-base font-bold text-foreground">৳{s.totalAmount?.toLocaleString("bn-BD")}</p>
-                        {s.dueAmount > 0 && <p className="text-sm text-destructive font-semibold">বাকি: ৳{s.dueAmount.toLocaleString("bn-BD")}</p>}
+                        <p className="text-base font-bold text-foreground">৳{s.total_amount?.toLocaleString("bn-BD")}</p>
+                        {s.due_amount > 0 && <p className="text-sm text-destructive font-semibold">বাকি: ৳{s.due_amount.toLocaleString("bn-BD")}</p>}
                         {(s.profit || 0) > 0 && <p className="text-xs text-success font-medium">লাভ: ৳{s.profit.toLocaleString("bn-BD")}</p>}
                       </div>
                       <button onClick={() => handleEditSale(s)} className="p-2 rounded-lg hover:bg-primary/10">
